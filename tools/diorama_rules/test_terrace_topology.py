@@ -1533,6 +1533,16 @@ class TerraceTopologyTests(unittest.TestCase):
                          [(-16, 0, "transition-south"), (0, 16, "transition-south")])
         self.assertEqual((at(30, 97)["groundQ16"], at(30, 97)["topQ16"], at(30, 97)["profile"]),
                          (0, 16, "transition-horizontal"))
+        # the grass bank along the river's west side a level over the rock plateau its stairs climb from (the owner's
+        # picture of 2026-11-13): the whole bank, its stairs from the plateau's level; the plateau, the grass south of
+        # it and the river left to the solver
+        for x, y in ((16, 46), (12, 30), (8, 40), (20, 47), (14, 50)):
+            self.assertEqual((at(x, y)["groundQ16"], at(x, y)["topQ16"], at(x, y).get("deck")), (16, 16, None))
+        for x in (21, 22):
+            self.assertEqual((at(x, 48)["groundQ16"], at(x, 48)["topQ16"], at(x, 48)["profile"]),
+                             (0, 16, "transition-horizontal"))
+        for x, y in ((20, 51), (25, 49), (18, 55), (25, 45)):
+            self.assertIsNone(at(x, y))
         self.assertFalse(any(cells[offset]["collision"] for offset in out))
 
     def test_stairs_whose_ends_do_not_meet_the_ground_lie_between_its_levels(self):

@@ -1645,10 +1645,17 @@ SEAM_KEEP: dict[str, dict] = {
 # them (pits) and the bridge on the ground, the paths through it. All of it stands a level up, level with that rock,
 # the bridge a deck the paths and the river run under; the east tiers' stairs between them (35-36, 89) lie flat; the
 # west stairs (5-6, 80) climb from the grass north of them (a level under the ground, as the terrace solver lays it)
-# over their row and the grass row before them, the east ones (30-31, 97) from the ground.
+# over their row and the grass row before them, the east ones (30-31, 97) from the ground. Its grass bank along the
+# river's west side (3-22, 28-51: elevation 4, the seed 16, 46) lay on the level of the rock plateau south of it
+# (19-26, 49-52), the plateau's north rim (18-20, 48) a dark band at the plateau's height and the stairs up from the
+# plateau (21-22, 48) lying flat (the owner's picture of 2026-11-13: "the third floor doesn't look 3d"); the GBA draws
+# that rim as the bank's south face, the plateau a level over the grass south of it: the bank stands a level over the
+# plateau ("more_tops"), its stairs climbing to it.
 MOUNTAIN_LEVELS: dict[str, dict] = {
     "LAYOUT_ROUTE119": {"top": ((5, 83), 16), "decks": ((7, 84, 33, 85),),
-                        "climbs": (((5, 79, 6, 80), "s", -16, 16), ((30, 97, 31, 97), "n", 0, 16))},
+                        "more_tops": (((16, 46), 16),),
+                        "climbs": (((5, 79, 6, 80), "s", -16, 16), ((30, 97, 31, 97), "n", 0, 16),
+                                   ((21, 48, 22, 48), "n", 0, 16))},
 }
 # Towns of terraces whose streets the GBA gives one elevation, their stairs the only sign of their levels
 # (terrace_topology.stair_terraces; KNOWN_ISSUES MS-172): Sootopolis City's crater of terraces round its lake lay flat,

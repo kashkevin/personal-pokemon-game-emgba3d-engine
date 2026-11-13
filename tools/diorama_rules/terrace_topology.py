@@ -2232,27 +2232,28 @@ def mountain_by_hand(cells: tuple[dict, ...], width: int, height: int, spec: dic
     bridge's shape, buildings.c lays what lies under one); `spec["climbs"]` are hand_slopes, laid last. Returns the
     tops' and the climbs' entries, or with `decks` the decks' alone: compile_rules lays those after the passes that
     stand water, rock and trees on the ground beside them (a deck is no ground: the river by it rose to it, trees
-    beside it stood on it)."""
-    (x, y), level = spec["top"]
-    start = y * width + x
-    elevation = cells[start].get("elevation")
+    beside it stood on it). `spec["more_tops"]`, more seeds and levels laid the same way (Route 119's grass bank over
+    its river's west side, a level over the rock plateau its stairs climb from: the owner's picture of 2026-11-13)."""
     rects = spec.get("decks", ())
     out: dict[int, dict] = {}
-    seen, queue = {start}, deque([start])
-    while queue:
-        offset = queue.popleft()
-        x, y = offset % width, offset // width
-        deck = (cells[offset].get("elevation") == 15
-                or any(x0 <= x <= x1 and y0 <= y <= y1 for x0, y0, x1, y1 in rects))
-        if deck == decks:
-            out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none", "solid": False}
-            if deck:
-                out[offset]["deck"] = True
-        for neighbor in _neighbours(offset, width, height):
-            if (neighbor not in seen and cells[neighbor].get("collision", 0) == 0
-                    and cells[neighbor].get("elevation") in (elevation, 15)):
-                seen.add(neighbor)
-                queue.append(neighbor)
+    for (x, y), level in (spec["top"], *spec.get("more_tops", ())):
+        start = y * width + x
+        elevation = cells[start].get("elevation")
+        seen, queue = {start}, deque([start])
+        while queue:
+            offset = queue.popleft()
+            x, y = offset % width, offset // width
+            deck = (cells[offset].get("elevation") == 15
+                    or any(x0 <= x <= x1 and y0 <= y <= y1 for x0, y0, x1, y1 in rects))
+            if deck == decks:
+                out[offset] = {"groundQ16": level, "topQ16": level, "profile": "none", "solid": False}
+                if deck:
+                    out[offset]["deck"] = True
+            for neighbor in _neighbours(offset, width, height):
+                if (neighbor not in seen and cells[neighbor].get("collision", 0) == 0
+                        and cells[neighbor].get("elevation") in (elevation, 15)):
+                    seen.add(neighbor)
+                    queue.append(neighbor)
     if not decks:
         out.update(hand_slopes(width, spec.get("climbs", ())))
     return out
