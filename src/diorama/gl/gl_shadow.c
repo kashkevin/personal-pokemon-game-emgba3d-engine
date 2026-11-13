@@ -36,6 +36,8 @@ static const float sSunZ = 0.55f;
 static bool sEnabled;
 static bool sReady;
 static bool sActiveThisFrame;
+/* The camera the map now held was drawn for (DioramaGLShadow_CasterCamera). */
+static float sCasterX, sCasterZ;
 static GLuint sFramebuffer;
 static GLuint sDepthTexture;
 static GLfloat sLightMatrix[16];
@@ -243,7 +245,23 @@ bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength,
     sCachedY = cy;
     sCachedGeneration = casterGeneration;
     sCachedMs = SDL_GetTicks();
+    sCasterX = cameraX;
+    sCasterZ = cameraZ;
     sActiveThisFrame = true;
+    return true;
+}
+
+bool DioramaGLShadow_InUse(void)
+{
+    return sActiveThisFrame && sCacheValid;
+}
+
+bool DioramaGLShadow_CasterCamera(float *cameraX, float *cameraZ)
+{
+    if (!sActiveThisFrame || !sCacheValid)
+        return false;
+    *cameraX = sCasterX;
+    *cameraZ = sCasterZ;
     return true;
 }
 

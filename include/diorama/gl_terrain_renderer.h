@@ -55,6 +55,10 @@ void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
 const struct DioramaTerrainMetrics *DioramaGLTerrain_GetMetrics(void);
 /* Changes whenever what DrawShadow draws changes. */
 uint32_t DioramaGLTerrain_GetGeometryGeneration(void);
+/* Changes when the view the voxel trees' levels of detail were measured from for the shadow map has been left (a
+ * zoom, a tilt): the shadow map is to be drawn again, so each tree's shadow stays its own model's (KNOWN_ISSUES
+ * MS-244). Folded into the shadow map's caster generation. */
+uint32_t DioramaGLTerrain_TreeLodGeneration(void);
 /* How the palette's night tint and fades move a colour this frame, per channel
  * (faded = scale x unfaded + offset), fitted from the trees' palette. */
 void DioramaGLTerrain_GetPaletteLine(float scale[3], float offset[3]);

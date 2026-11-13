@@ -38,6 +38,13 @@ bool DioramaGLShadow_Begin(float cameraX, float cameraZ, float strength,
 void DioramaGLShadow_End(int outputWidth, int outputHeight);
 /* The light left in a cast shadow this frame, for the lit passes' mix(). */
 float DioramaGLShadow_Ambient(void);
+/* Whether a shadow map is in use this frame (drawn now or kept from before). */
+bool DioramaGLShadow_InUse(void);
+/* The camera (the scene's x, z) the shadow map this frame uses was drawn for - it is redrawn only as the camera
+ * moves a step of its texels on, so it can lag the camera by a couple of tiles; false with no map this frame. The
+ * voxel trees' levels of detail are measured from it in both passes, so each tree's shadow is its own model's
+ * (gl_terrain_renderer.c, KNOWN_ISSUES MS-244). */
+bool DioramaGLShadow_CasterCamera(float *cameraX, float *cameraZ);
 /* The sun's view-projection, column major (for glUniformMatrix4fv). */
 const GLfloat *DioramaGLShadow_LightMatrix(void);
 /* Binds the depth map to DIORAMA_SHADOW_TEXTURE_UNIT for the lit passes;

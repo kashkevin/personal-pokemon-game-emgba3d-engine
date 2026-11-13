@@ -311,8 +311,45 @@ enum
 {
     TREE_RANGE_ALL,
     TREE_RANGE_VIEW,
+    TREE_RANGE_LOD1, /* the coarser models (terrain_mesh.h BuildTreeModelLod): 2-voxel blocks ... */
+    TREE_RANGE_LOD2, /* ... and 4-voxel blocks */
     TREE_RANGE_COUNT
 };
+/*
+ * The voxel trees' levels of detail (KNOWN_ISSUES MS-244, the owner's decision #58). A scene can hold some 900 trees
+ * (Petalburg City) and the whole model is 2,424 faces: drawn for every tree on screen, and again for every tree
+ * resident for the sun's shadows, millions of triangles a frame, which a software rasterizer (Mesa's llvmpipe) bins
+ * in memory of its own - a gigabyte more than the default trees. So:
+ *  - a tree on the picture is drawn with the coarsest model whose block, on the picture, is no larger than a voxel of
+ *    a tree by the player: whole while its depth along the view is under TREE_LOD_NEAR times the player's (the camera
+ *    rig's targetDepth), in 2-voxel blocks (compile_vox.py: about a quarter of the faces) under TREE_LOD_FAR times,
+ *    in 4-voxel blocks (about a fourteenth) past - each standing on the ground where the tree does, as tall. The
+ *    usual cameras' pictures end before that (the adventure camera's top edge at about one and a half times the
+ *    player's depth, the diorama camera's at about 1.2), so their trees stay whole; the distance a low camera sees is
+ *    drawn coarser;
+ *  - the sun's shadows: a tree on the picture, or within TREE_LOD_MARGIN tiles of it, casts its shadow with the model
+ *    it is drawn with (a coarser one's, standing a voxel proud of the tree here and there, would fall on the tree's
+ *    own sunlit side); a tree farther off the picture, whose shadow cannot reach it, with the 4-voxel model;
+ *  - both passes measure from the view the shadow map now held was drawn for, so each tree's shadow is its own
+ *    model's; a view that has moved on from it (a zoom, a tilt) has the map drawn again
+ *    (DioramaGLTerrain_TreeLodGeneration);
+ *  - and every model is closed and wound one way about its outward sides (terrain_mesh.c BuildTreeFaces), so each
+ *    pass culls the faces turned away from its eye - the camera's, the sun's - which the tree's own front faces hide:
+ *    half the triangles, the picture the same but for the odd pixel on an edge two faces share.
+ * PKMN_DIORAMA_TREE_LOD=0 draws every tree and every shadow whole with every face, as before (for comparisons);
+ * =<near>,<far> other ratios; PKMN_DIORAMA_TREE_CULL=0 the levels without the culling.
+ */
+#define TREE_LOD_NEAR 2.0f
+#define TREE_LOD_FAR 4.0f
+#define TREE_LOD_MARGIN 4.0f
+/* The winding a front face shows on the picture (the scene's x east, y up, z north, the eye south looking north) and
+ * in the sun's view (an ordinary look-at), for the models' outward winding (DrawTreesByLevel's culling). */
+#ifndef TREE_FRONT_COLOUR
+#define TREE_FRONT_COLOUR GL_CW
+#endif
+#ifndef TREE_FRONT_SHADOW
+#define TREE_FRONT_SHADOW GL_CCW
+#endif
 static GLuint sTreeVertexArray;
 static GLuint sTreeVertexBuffer;
 static GLuint sTreeIndexBuffer;
@@ -323,6 +360,18 @@ static uint32_t sTreeIndexSize;
 static uint32_t sTreeRangeFirst[TREE_RANGE_COUNT]; /* in indices */
 static uint32_t sTreeRangeCount[TREE_RANGE_COUNT];
 static struct DioramaTerrainBounds sTreeModelBounds; /* before an instance's offset */
+static struct DioramaTerrainTreeInstance sLodTreeInstances[TERRAIN_MAX_VISIBLE_TREE_INSTANCES];
+/* A view the levels are measured from (DioramaTerrain_TreeLodLevel): the camera in the chunks' frame and the
+ * player's depth. */
+struct TreeLodView
+{
+    bool valid;
+    struct DioramaTerrainView view;
+    float targetDepth;
+};
+static struct TreeLodView sLodNow;    /* the colour pass's, as its last frame saw */
+static struct TreeLodView sLodShadow; /* the one the shadow map now held was drawn for */
+static uint32_t sTreeLodGeneration;
 /*
  * PKMN_DIORAMA_TREE_CHECK=1 (tests): the model is also kept as it was drawn
  * before (six vertices a face, every tree of every chunk on screen, every
@@ -678,8 +727,8 @@ static bool CreateTreeBuffers(void)
             DIORAMA_TERRAIN_MAX_VERTICES, &sTreeModelVertexCount, &sTreeModelBounds)
      || sTreeModelVertexCount == 0)
         return false;
-    /* Room for every face's indices twice (both ranges). */
-    indices = malloc((size_t)sTreeModelVertexCount * 2 * sizeof(*indices));
+    /* Room for every face's indices twice (both ranges), and the coarser models' once. */
+    indices = malloc(((size_t)sTreeModelVertexCount * 2 + 6 * DioramaTerrain_TreeModelLodFaces()) * sizeof(*indices));
     if (indices == NULL)
         return false;
     dglGenVertexArrays(1, &sTreeVertexArray);
@@ -720,6 +769,24 @@ static bool CreateTreeBuffers(void)
         sTreeRangeCount[TREE_RANGE_VIEW] = viewCount;
     }
     total = indexCount + viewCount;
+    /* The coarser models (TREE_RANGE_LOD1, TREE_RANGE_LOD2), after the whole one's vertices and indices. */
+    for (unsigned level = 1; level <= 2; level++)
+    {
+        struct DioramaTerrainBounds lodBounds;
+        uint32_t raw = 0, lodIndices = 0, lodVertices;
+
+        sTreeRangeFirst[TREE_RANGE_LOD1 + level - 1] = total;
+        sTreeRangeCount[TREE_RANGE_LOD1 + level - 1] = 0;
+        if (!DioramaTerrain_BuildTreeModelLod(level, &sScratchVertices[vertexCount],
+                                              DIORAMA_TERRAIN_MAX_VERTICES - vertexCount, &raw, &lodBounds))
+            continue;
+        lodVertices = DioramaTerrain_FoldQuads(&sScratchVertices[vertexCount], raw, &indices[total], &lodIndices);
+        for (i = 0; i < lodIndices; i++)
+            indices[total + i] += vertexCount;
+        sTreeRangeCount[TREE_RANGE_LOD1 + level - 1] = lodIndices;
+        total += lodIndices;
+        vertexCount += lodVertices;
+    }
     sTreeIndexType = GL_UNSIGNED_INT;
     sTreeIndexSize = sizeof(uint32_t);
     if (vertexCount <= 0x10000)
@@ -741,9 +808,135 @@ static bool CreateTreeBuffers(void)
     ConfigureTreeInstances();
     dglBindVertexArray(0);
     free(indices);
-    SDL_Log("Diorama: tree model %u faces, %u vertices drawn from %u (%u indices; %u seen from above and south)",
-            faceCount, sTreeModelVertexCount, vertexCount, indexCount, viewCount);
+    SDL_Log("Diorama: tree model %u faces, %u vertices drawn from %u (%u indices; %u seen from above and south; "
+            "the coarser models %u and %u indices)", faceCount, sTreeModelVertexCount, vertexCount, indexCount,
+            viewCount, sTreeRangeCount[TREE_RANGE_LOD1], sTreeRangeCount[TREE_RANGE_LOD2]);
     return true;
+}
+
+static void DrawTrees(const struct DioramaTerrainTreeInstance *trees, uint32_t count, int range);
+
+/* The levels' depth ratios (TREE_LOD_NEAR, TREE_LOD_FAR; PKMN_DIORAMA_TREE_LOD): false for every tree whole. */
+static bool TreeLodRatios(float *nearRatio, float *farRatio)
+{
+    static int sRead;
+    static bool sOn;
+    static float sNear, sFar;
+
+    if (!sRead)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_TREE_LOD");
+
+        sRead = 1;
+        sOn = true;
+        sNear = TREE_LOD_NEAR;
+        sFar = TREE_LOD_FAR;
+        if (value != NULL && strcmp(value, "0") == 0)
+            sOn = false;
+        else if (value != NULL && (sscanf(value, "%f,%f", &sNear, &sFar) != 2 || !(sNear > 0.0f && sFar >= sNear)))
+        {
+            sNear = TREE_LOD_NEAR;
+            sFar = TREE_LOD_FAR;
+        }
+    }
+    *nearRatio = sNear;
+    *farRatio = sFar;
+    return sOn && sTreeRangeCount[TREE_RANGE_LOD1] != 0 && sTreeRangeCount[TREE_RANGE_LOD2] != 0;
+}
+
+/* A view to measure the levels from: the camera (its target in the chunks' frame) and the player's depth on the
+ * picture (the rig's; none - every tree whole - with no rig). */
+static struct TreeLodView TreeLodViewFor(float x, float z, float pitch, float focalLength)
+{
+    struct TreeLodView lod;
+
+    DioramaTerrain_PrepareView(&lod.view, x, z, pitch, focalLength);
+    lod.targetDepth = gDioramaCameraRig.active ? gDioramaCameraRig.targetDepth : 0.0f;
+    lod.valid = lod.targetDepth > 0.0f;
+    return lod;
+}
+
+/* Two views alike enough for one tree's level and its shadow's: the camera within a couple of tiles (the shadow map
+ * is drawn again as the camera moves a step of its texels on), its pitch and the player's depth all but the same. */
+static bool TreeLodViewsAlike(const struct TreeLodView *a, const struct TreeLodView *b)
+{
+    return a->valid && b->valid && fabsf(a->view.cameraX - b->view.cameraX) < 2.5f
+        && fabsf(a->view.cameraZ - b->view.cameraZ) < 2.5f && fabsf(a->view.pitchSin - b->view.pitchSin) < 0.01f
+        && fabsf(a->targetDepth - b->targetDepth) < 0.03f * b->targetDepth;
+}
+
+static struct DioramaTerrainBounds TreeBounds(const struct DioramaTerrainTreeInstance *tree);
+
+/* PKMN_DIORAMA_TREE_CULL=0: the levels' trees drawn with every face, those turned away too (for comparisons). */
+static bool TreeCullEnabled(void)
+{
+    static int sOn = -1;
+
+    if (sOn < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_TREE_CULL");
+
+        sOn = value == NULL || strcmp(value, "0") != 0;
+    }
+    return sOn != 0;
+}
+
+/* Draws `count` trees (in the chunks' frame), each with its level's model on `lod` (wholeRange its whole one: every
+ * face, or those seen); with `offPicture`, a tree neither on that view's picture nor within TREE_LOD_MARGIN tiles of it
+ * with the coarsest (the shadow pass). The models are closed and wound one way about their outward sides
+ * (terrain_mesh.c BuildTreeFaces), so the faces turned away from the pass's eye - hidden behind the tree's own front
+ * ones - are culled: `frontFace` is the winding the pass's projection shows a front face with (KNOWN_ISSUES MS-244).
+ * Returns the vertices drawn. */
+static uint32_t DrawTreesByLevel(const struct DioramaTerrainTreeInstance *trees, uint32_t count,
+                                 const struct TreeLodView *lod, float nearRatio, float farRatio, int wholeRange,
+                                 bool offPicture, GLenum frontFace)
+{
+    const int ranges[3] = {wholeRange, TREE_RANGE_LOD1, TREE_RANGE_LOD2};
+    uint32_t start[4] = {0, 0, 0, 0}, vertices = 0;
+    static uint8_t sLevels[TERRAIN_MAX_VISIBLE_TREE_INSTANCES];
+
+    /* a counting sort into sLodTreeInstances: the whole trees, then the 2-voxel ones, then the 4-voxel ones */
+    for (uint32_t i = 0; i < count; i++)
+    {
+        struct DioramaTerrainBounds bounds = TreeBounds(&trees[i]);
+        int level = DioramaTerrain_TreeLodLevel(&lod->view, lod->targetDepth, &bounds, nearRatio, farRatio, offPicture,
+                                                TREE_LOD_MARGIN);
+
+        sLevels[i] = (uint8_t)level;
+        start[level + 1]++;
+    }
+    start[2] += start[1];
+    start[3] += start[2];
+    {
+        uint32_t next[3] = {start[0], start[1], start[2]};
+
+        for (uint32_t i = 0; i < count; i++)
+            sLodTreeInstances[next[sLevels[i]]++] = trees[i];
+    }
+    if (TreeCullEnabled())
+    {
+        glEnable(GL_CULL_FACE);
+        glCullFace(GL_BACK);
+        glFrontFace(frontFace);
+    }
+    for (int level = 0; level < 3; level++)
+    {
+        uint32_t n = start[level + 1] - start[level];
+
+        DrawTrees(&sLodTreeInstances[start[level]], n, ranges[level]);
+        vertices += sTreeRangeCount[ranges[level]] * n;
+    }
+    if (TreeCullEnabled())
+    {
+        glDisable(GL_CULL_FACE);
+        glFrontFace(GL_CCW);
+    }
+    return vertices;
+}
+
+uint32_t DioramaGLTerrain_TreeLodGeneration(void)
+{
+    return sTreeLodGeneration;
 }
 
 /* A tree's place: the model's bounds moved by its offset. */
@@ -4297,6 +4490,9 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     float viewX = cameraX + (float)sShiftX;
     float viewZ = cameraZ - (float)sShiftY;
     struct TreeEye eye = TreeEyeFor(viewX, viewZ, cameraPitch);
+
+    if (!debug)
+        sLodNow = TreeLodViewFor(viewX, viewZ, cameraPitch, focalLength);
     int i;
 
     sDebugDrawn = debug;
@@ -4440,14 +4636,29 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
             dglUniform3f(sPixelScaleLocation, sTreeScale[0], sTreeScale[1], sTreeScale[2]);
             dglUniform3f(sPixelOffsetLocation, sTreeOffset[0], sTreeOffset[1], sTreeOffset[2]);
         }
+        uint32_t treeVertices = sTreeRangeCount[treeRange] * visibleTreeCount;
+        float lodNear, lodFar;
+        const struct TreeLodView *lod = &sLodNow;
+
+        if (!debug && TreeLodRatios(&lodNear, &lodFar) && DioramaGLShadow_InUse())
+        {
+            /* the levels the shadow map was drawn with, or, the view having left it, this view's and the map again */
+            if (TreeLodViewsAlike(&sLodShadow, &sLodNow))
+                lod = &sLodShadow;
+            else
+                sTreeLodGeneration++;
+        }
         if (TreeCheckEnabled())
             CheckTrees(checkTreeCount, visibleTreeCount, treeRange);
+        else if (!debug && TreeLodRatios(&lodNear, &lodFar) && lod->valid)
+            treeVertices = DrawTreesByLevel(sVisibleTreeInstances, visibleTreeCount, lod, lodNear, lodFar, treeRange,
+                                            false, TREE_FRONT_COLOUR);
         else
             DrawTrees(sVisibleTreeInstances, visibleTreeCount, treeRange);
         dglUniform3f(sPixelScaleLocation, 1.0f, 1.0f, 1.0f);
         dglUniform3f(sPixelOffsetLocation, 0.0f, 0.0f, 0.0f);
-        sMetrics.vertices += sTreeRangeCount[treeRange] * visibleTreeCount;
-        sMetrics.triangles += sTreeRangeCount[treeRange] * visibleTreeCount / 3;
+        sMetrics.vertices += treeVertices;
+        sMetrics.triangles += treeVertices / 3;
         sMetrics.drawCalls++;
     }
     sMetrics.visibleTreeInstances = visibleTreeCount;
@@ -4555,8 +4766,23 @@ void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
              && treeCount < TERRAIN_MAX_VISIBLE_TREE_INSTANCES; tree++)
             sVisibleTreeInstances[treeCount++] = chunk->mesh.treeInstances[tree];
     }
-    /* every face: the sun sees them from another side */
-    DrawTrees(sVisibleTreeInstances, treeCount, TREE_RANGE_ALL);
+    /* every face: the sun sees them from another side; each tree with the model the colour pass draws it with, from
+     * the colour pass's view with this map's camera (sLodShadow), and the trees off its picture coarsest */
+    {
+        float lodNear, lodFar, casterX, casterZ;
+
+        sLodShadow.valid = false;
+        if (TreeLodRatios(&lodNear, &lodFar) && sLodNow.valid && DioramaGLShadow_CasterCamera(&casterX, &casterZ))
+        {
+            sLodShadow = sLodNow;
+            sLodShadow.view.cameraX = casterX + (float)sShiftX;
+            sLodShadow.view.cameraZ = casterZ - (float)sShiftY;
+            DrawTreesByLevel(sVisibleTreeInstances, treeCount, &sLodShadow, lodNear, lodFar, TREE_RANGE_ALL, true,
+                             TREE_FRONT_SHADOW);
+        }
+        else
+            DrawTrees(sVisibleTreeInstances, treeCount, TREE_RANGE_ALL);
+    }
     dglUniform1i(sShadowPassLocation, 0);
     dglUniform3f(sMeshShiftLocation, 0.0f, 0.0f, 0.0f);
 }

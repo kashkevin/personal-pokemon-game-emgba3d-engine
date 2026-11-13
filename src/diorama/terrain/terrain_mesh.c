@@ -2332,9 +2332,9 @@ static bool AppendPixelQuad(struct DioramaTerrainVertex *vertices, uint32_t capa
                             uint32_t *count, const float positions[4][3], float shade,
                             uint32_t color);
 
-bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
-                                   uint32_t capacity, uint32_t *vertexCount,
-                                   struct DioramaTerrainBounds *bounds)
+static bool BuildTreeFaces(const struct DioramaTreeModelFace *faces, uint32_t faceCount,
+                           struct DioramaTerrainVertex *vertices, uint32_t capacity, uint32_t *vertexCount,
+                           struct DioramaTerrainBounds *bounds)
 {
     const int originX = 0;
     const int originZ = (DIORAMA_VOXELS_PER_CELL * 2 - DIORAMA_TREE_MODEL_SIZE_Z) / 2;
@@ -2346,9 +2346,9 @@ bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
     bounds->minX = bounds->minY = bounds->minZ = FLT_MAX;
     bounds->maxX = bounds->maxY = bounds->maxZ = -FLT_MAX;
 
-    for (uint32_t index = 0; index < gDioramaTreeModelFaceCount; index++)
+    for (uint32_t index = 0; index < faceCount; index++)
     {
-        const struct DioramaTreeModelFace *source = &gDioramaTreeModelFaces[index];
+        const struct DioramaTreeModelFace *source = &faces[index];
         int minimum[3] = {0, 0, 0};
         int maximum[3] = {0, 0, 0};
         int uAxis = (source->axis + 1) % 3;
@@ -2403,6 +2403,34 @@ bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
             shade = source->sign > 0 ? 1.0f : 0.58f;
         }
         FacePositions(&face, positions);
+        {
+            /* Every face wound one way about its outward side - its voxel's open one: the .vox's depth axis runs
+             * against the scene's z - so a pass can cull the faces turned away from it (KNOWN_ISSUES MS-244); the
+             * same two triangles either way, corners 1 and 3 swapped. */
+            float outward[3] = {0.0f, 0.0f, 0.0f};
+            float a[3], b[3];
+
+            if (source->axis == 0)
+                outward[0] = (float)source->sign;
+            else if (source->axis == 1)
+                outward[2] = -(float)source->sign;
+            else
+                outward[1] = (float)source->sign;
+            for (int k = 0; k < 3; k++)
+            {
+                a[k] = positions[1][k] - positions[0][k];
+                b[k] = positions[2][k] - positions[0][k];
+            }
+            if ((a[1] * b[2] - a[2] * b[1]) * outward[0] + (a[2] * b[0] - a[0] * b[2]) * outward[1]
+              + (a[0] * b[1] - a[1] * b[0]) * outward[2] < 0.0f)
+            {
+                float temporary[3];
+
+                memcpy(temporary, positions[1], sizeof(temporary));
+                memcpy(positions[1], positions[3], sizeof(temporary));
+                memcpy(positions[3], temporary, sizeof(temporary));
+            }
+        }
         if (!AppendPixelQuad(vertices, capacity, vertexCount, positions, shade, source->rgba))
             return false;
         for (int corner = 0; corner < 4; corner++)
@@ -2418,6 +2446,26 @@ bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
     return true;
 }
 
+bool DioramaTerrain_BuildTreeModel(struct DioramaTerrainVertex *vertices,
+                                   uint32_t capacity, uint32_t *vertexCount,
+                                   struct DioramaTerrainBounds *bounds)
+{
+    return BuildTreeFaces(gDioramaTreeModelFaces, gDioramaTreeModelFaceCount, vertices, capacity, vertexCount,
+                          bounds);
+}
+
+bool DioramaTerrain_BuildTreeModelLod(unsigned level, struct DioramaTerrainVertex *vertices,
+                                      uint32_t capacity, uint32_t *vertexCount,
+                                      struct DioramaTerrainBounds *bounds)
+{
+    if (level == 0)
+        return DioramaTerrain_BuildTreeModel(vertices, capacity, vertexCount, bounds);
+    if (level > DIORAMA_TREE_MODEL_LODS)
+        return false;
+    return BuildTreeFaces(&gDioramaTreeModelLodFaces[gDioramaTreeModelLodFirst[level - 1]],
+                          gDioramaTreeModelLodCount[level - 1], vertices, capacity, vertexCount, bounds);
+}
+
 void DioramaTerrain_SetGeometryHash(bool on)
 {
     sNoGeometryHash = !on;
@@ -2431,6 +2479,38 @@ void DioramaTerrain_SetVoxelOccupancyOnly(bool on)
 uint32_t DioramaTerrain_TreeModelFaceCount(void)
 {
     return gDioramaTreeModelFaceCount;
+}
+
+int DioramaTerrain_TreeLodLevel(const struct DioramaTerrainView *view, float targetDepth,
+                                const struct DioramaTerrainBounds *bounds, float nearRatio, float farRatio,
+                                bool offPicture, float margin)
+{
+    float y = (bounds->minY + bounds->maxY) * 0.5f;
+    float z = (bounds->minZ + bounds->maxZ) * 0.5f;
+    float depth = (view->cameraHeight - y) * view->pitchSin + (z - view->cameraZ + view->cameraDistance) * view->pitchCos;
+    int level = depth < nearRatio * targetDepth ? 0 : depth < farRatio * targetDepth ? 1 : 2;
+
+    if (offPicture && level < 2)
+    {
+        struct DioramaTerrainBounds around = *bounds;
+
+        around.minX -= margin;
+        around.maxX += margin;
+        around.minZ -= margin;
+        around.maxZ += margin;
+        if (!DioramaTerrain_IsBoundsInView(view, &around))
+            level = 2;
+    }
+    return level;
+}
+
+uint32_t DioramaTerrain_TreeModelLodFaces(void)
+{
+    uint32_t faces = 0;
+
+    for (unsigned level = 0; level < DIORAMA_TREE_MODEL_LODS; level++)
+        faces += gDioramaTreeModelLodCount[level];
+    return faces;
 }
 
 /* compile_vox.py's sign is the side of its voxel a face lies on, along the

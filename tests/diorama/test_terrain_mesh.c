@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -1516,6 +1517,135 @@ static void TestAuthoredTreeModelBuildsOnceInLocalSpace(void)
         assert(sVertices[vertex].textureLayer == DIORAMA_TERRAIN_TEXTURE_VERTEX_COLOR);
 }
 
+/* The tree's coarser models for distant trees and the sun's shadows (KNOWN_ISSUES MS-244): level 0 is the whole
+ * model; each coarser level a few times fewer faces, coloured as the model is, standing where it stands - on the
+ * ground where the tree's trunk does (no tree floating or sunk at a distance), as tall, no wider; past the last
+ * level, none. */
+static void TestTreeModelLevelsOfDetail(void)
+{
+    struct DioramaTerrainBounds whole, bounds;
+    uint32_t wholeCount, count, previous;
+
+    assert(DioramaTerrain_BuildTreeModel(sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &wholeCount, &whole));
+    assert(DioramaTerrain_BuildTreeModelLod(0, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &count, &bounds));
+    assert(count == wholeCount && bounds.minY == whole.minY && bounds.maxY == whole.maxY);
+    assert(DIORAMA_TREE_MODEL_LODS == 2);
+    previous = gDioramaTreeModelFaceCount;
+    for (unsigned level = 1; level <= DIORAMA_TREE_MODEL_LODS; level++)
+    {
+        uint32_t faces = gDioramaTreeModelLodCount[level - 1];
+
+        assert(DioramaTerrain_BuildTreeModelLod(level, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &count, &bounds));
+        assert(count == faces * 6);
+        assert(faces * 3 < previous);
+        assert(bounds.minY == whole.minY && bounds.maxY == whole.maxY);
+        assert(bounds.minX >= whole.minX && bounds.maxX <= whole.maxX);
+        assert(bounds.minZ >= whole.minZ && bounds.maxZ <= whole.maxZ);
+        for (uint32_t vertex = 0; vertex < count; vertex++)
+            assert(sVertices[vertex].textureLayer == DIORAMA_TERRAIN_TEXTURE_VERTEX_COLOR);
+        previous = faces;
+    }
+    assert(DioramaTerrain_TreeModelLodFaces() == gDioramaTreeModelLodCount[0] + gDioramaTreeModelLodCount[1]);
+    assert(!DioramaTerrain_BuildTreeModelLod(DIORAMA_TREE_MODEL_LODS + 1, sVertices, DIORAMA_TERRAIN_MAX_VERTICES,
+                                             &count, &bounds));
+}
+
+/* Every face of the tree's models wound one way about its outward side (KNOWN_ISSUES MS-244: a pass culls the faces
+ * turned away from it): each quad's turn points out of its voxel, and the models' signed volumes are the tree's
+ * (the whole one exactly: its voxels, 16 to a tile's side) - a face wound the other way would take its area off. */
+static double SignedVolume(const struct DioramaTerrainVertex *v, uint32_t count)
+{
+    double volume = 0.0;
+
+    for (uint32_t i = 0; i + 2 < count; i += 3)
+    {
+        double ax = v[i].x, ay = v[i].y, az = v[i].z, bx = v[i + 1].x, by = v[i + 1].y, bz = v[i + 1].z;
+        double cx = v[i + 2].x, cy = v[i + 2].y, cz = v[i + 2].z;
+
+        volume += (ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx)) / 6.0;
+    }
+    return volume;
+}
+
+static void TestTreeFacesWoundOutward(void)
+{
+    struct DioramaTerrainBounds bounds;
+    uint32_t count;
+    double whole, volume;
+
+    assert(DioramaTerrain_BuildTreeModel(sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &count, &bounds));
+    for (uint32_t face = 0; face < gDioramaTreeModelFaceCount; face++)
+    {
+        const struct DioramaTerrainVertex *q = &sVertices[face * 6];
+        const struct DioramaTreeModelFace *source = &gDioramaTreeModelFaces[face];
+        float a[3] = {q[1].x - q[0].x, q[1].y - q[0].y, q[1].z - q[0].z};
+        float b[3] = {q[2].x - q[0].x, q[2].y - q[0].y, q[2].z - q[0].z};
+        float n[3] = {a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]};
+        float out = source->axis == 0 ? n[0] * source->sign : source->axis == 1 ? -n[2] * source->sign
+                  : n[1] * source->sign;
+
+        assert(out > 0.0f);
+    }
+    whole = SignedVolume(sVertices, count);
+    assert(fabs(whole - gDioramaTreeModelVoxelCount / 4096.0) < 1e-3);
+    for (unsigned level = 1; level <= DIORAMA_TREE_MODEL_LODS; level++)
+    {
+        assert(DioramaTerrain_BuildTreeModelLod(level, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &count, &bounds));
+        volume = SignedVolume(sVertices, count);
+        assert(volume > whole * 0.8 && volume < whole * 1.25);
+    }
+}
+
+/* A tree's level of detail on a view (KNOWN_ISSUES MS-244): by its depth along the view against the player's - whole
+ * under twice it, the 2-voxel model under four times, the 4-voxel one past; for the sun's shadows, a tree neither on
+ * the picture nor within the margin of it the coarsest. The overworld's own eye (no rig): 16 tiles up, pitch 42. */
+static struct DioramaTerrainBounds TreeAt(float x, float z)
+{
+    struct DioramaTerrainBounds bounds = {x, 0.0f, z - 1.0f, x + 2.0f, 2.125f, z + 0.25f};
+
+    return bounds;
+}
+
+static void TestTreeLevelsOfDetailByDepth(void)
+{
+    const float degree = 3.14159265f / 180.0f, focal = 80.0f / tanf(16.5f * degree);
+    struct DioramaTerrainView view;
+    struct DioramaTerrainBounds near, mid, far, beside, aside, behind;
+    float targetDepth;
+
+    gDioramaCameraRig.active = false;
+    DioramaTerrain_PrepareView(&view, 50.0f, 50.0f, 42.0f * degree, focal);
+    targetDepth = view.cameraHeight * view.pitchSin + view.cameraDistance * view.pitchCos; /* the target's, at y = 0 */
+    near = TreeAt(49.0f, 52.0f);
+    mid = TreeAt(49.0f, 50.0f + 40.0f);    /* past twice the target's depth (and past the picture's top) */
+    far = TreeAt(49.0f, 50.0f + 120.0f);   /* past four times */
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &near, 2.0f, 4.0f, false, 4.0f) == 0);
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &mid, 2.0f, 4.0f, false, 4.0f) == 1);
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &far, 2.0f, 4.0f, false, 4.0f) == 2);
+    /* the sun's shadows: on the picture as drawn, off it (past the margin) the coarsest */
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &near, 2.0f, 4.0f, true, 4.0f) == 0);
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &mid, 2.0f, 4.0f, true, 4.0f) == 2);
+    /* by the player in depth, off the picture's side: within the margin as drawn, past it the coarsest */
+    beside = TreeAt(50.0f + 12.5f, 50.0f);
+    aside = TreeAt(50.0f + 20.0f, 50.0f);
+    assert(!DioramaTerrain_IsBoundsInView(&view, &beside) && !DioramaTerrain_IsBoundsInView(&view, &aside));
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &beside, 2.0f, 4.0f, true, 4.0f) == 0);
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &aside, 2.0f, 4.0f, true, 4.0f) == 2);
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &aside, 2.0f, 4.0f, false, 4.0f) == 0);
+    /* behind the eye's own ground point: near in depth, off the picture */
+    behind = TreeAt(49.0f, 50.0f - view.cameraDistance - 6.0f);
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &behind, 2.0f, 4.0f, false, 4.0f) == 0);
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &behind, 2.0f, 4.0f, true, 4.0f) == 2);
+    /* a farther view's player (the diorama camera's long lens): everything here under 1.25 times its depth */
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth * 4.0f, &far, 2.0f, 4.0f, false, 4.0f) == 0);
+    /* a low camera that sees to the horizon: a tree past twice the target's depth on its picture keeps its level */
+    DioramaTerrain_PrepareView(&view, 50.0f, 50.0f, 15.0f * degree, focal);
+    targetDepth = view.cameraHeight * view.pitchSin + view.cameraDistance * view.pitchCos;
+    mid = TreeAt(49.0f, 50.0f + 80.0f);
+    assert(DioramaTerrain_IsBoundsInView(&view, &mid));
+    assert(DioramaTerrain_TreeLodLevel(&view, targetDepth, &mid, 2.0f, 4.0f, true, 4.0f) == 1);
+}
+
 /* The ground under a 2-wide voxel tree (KNOWN_ISSUES MS-242): its column a voxel thick and its skirt down a bank
  * to the water read the ground under the tree, not the tree's own drawing in bands (its body rows' upper layer,
  * see-through: the sky showed through the bank under a row of the voxel trees); where the map has a rock wall the
@@ -1918,6 +2048,9 @@ int main(void)
     TestFoldedQuadsDrawTheSameTriangles();
     TestTreeFloodRemovesGrassAndDrawnShadow();
     TestAuthoredTreeModelBuildsOnceInLocalSpace();
+    TestTreeModelLevelsOfDetail();
+    TestTreeFacesWoundOutward();
+    TestTreeLevelsOfDetailByDepth();
     TestLargeGroupedTreeUsesAuthoredVoxelModel();
     TestIncompleteLargeTreeFallsBackToFlatGround();
     TestTreeGroundBankReadsGround();

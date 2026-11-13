@@ -1059,6 +1059,7 @@ static void ApplyView(const struct View *view, const struct Layout *layout,
     gDioramaCameraRig.distance = view->distance * cosf(view->pitch);
     gDioramaCameraRig.screenOffsetY = 1.0f - 2.0f * (layout->gameY + view->row * layout->scale) / layout->outH;
     gDioramaCameraRig.aspectCorrection = *aspectCorrection;
+    gDioramaCameraRig.targetDepth = view->distance; /* the eye looks at the battle's middle from this far */
 }
 
 /*

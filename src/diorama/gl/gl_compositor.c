@@ -41,6 +41,7 @@
 #include "diorama/weather.h"
 #include "gba/defines.h"
 #include "platform/display_settings.h"
+#include "platform/memory_info.h"
 #include "constants/global.h"
 #include "constants/map_types.h"
 #include "constants/rtc.h"
@@ -1680,6 +1681,8 @@ static void ApplyCameraRig(float aspectCorrection)
     gDioramaCameraRig.distance = sCameraView.distance;
     gDioramaCameraRig.screenOffsetY = DIORAMA_OVERWORLD_SCREEN_OFFSET;
     gDioramaCameraRig.aspectCorrection = aspectCorrection;
+    /* the target's depth, as DioramaCamera_Frame places the eye for it */
+    gDioramaCameraRig.targetDepth = sCameraView.extent * sCameraView.focalLength / 160.0f;
 }
 
 static void SnapOpacity(float opacity)
@@ -2083,7 +2086,9 @@ void DioramaGL_UploadFrame(const u32 *argb8888)
  * the slowest - with the renderer's name. What a player's own log can tell of the 3D view's speed on their graphics
  * card and over a long session, without the profile (PKMN_DIORAMA_PROFILE=1) and its cost. In 1 ms steps to 250 ms;
  * a frame's own clock read is all it costs. Frames of menus, battles and the 2D view are not counted, and the next
- * 3D frame after them starts afresh.
+ * 3D frame after them starts afresh. With it, a line of the game's memory then (platform/memory_info.h: in use, its
+ * peak so far, the address space left) - what a 3D view's drawing costs in memory, through a software renderer
+ * above all (KNOWN_ISSUES MS-244: the voxel trees).
  */
 #define FRAME_SUMMARY_STEPS 251
 static uint32_t sFrameSteps[FRAME_SUMMARY_STEPS];
@@ -2114,6 +2119,16 @@ static void LogFrameSummary(void)
         SDL_Log("Diorama: frame times on map %d.%d: %u frames in 3D, median %d ms, 95%% within %d%s ms, slowest %.0f ms "
                 "(%s)", sFrameMap >> 8, sFrameMap & 0xFF, (unsigned)sFrameCount, median,
                 within, within == FRAME_SUMMARY_STEPS - 1 ? "+" : "", sFrameSlowest, renderer);
+        {
+            struct MemoryInfo memory;
+            char line[320];
+
+            if (MemoryInfo_Get(&memory))
+            {
+                MemoryInfo_Format(&memory, line, sizeof(line));
+                SDL_Log("Diorama: memory after map %d.%d: %s", sFrameMap >> 8, sFrameMap & 0xFF, line);
+            }
+        }
     }
     memset(sFrameSteps, 0, sizeof(sFrameSteps));
     sFrameCount = 0;
@@ -2467,7 +2482,8 @@ void DioramaGL_Present(u8 background, bool border, bool integerScale, float fram
                                   ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
                                   | (DioramaGLTerrain_GetGeometryGeneration()
                                    ^ DioramaGLTreeSprites_GetGeometryGeneration() * 2654435761u
-                                   ^ DioramaGLProps_GetGeometryGeneration() * 40503u)))
+                                   ^ DioramaGLProps_GetGeometryGeneration() * 40503u
+                                   ^ DioramaGLTerrain_TreeLodGeneration() * 2246822519u)))
         {
             DioramaGLTerrain_DrawShadow(sAtlasTexture.id, sBaseAtlasTexture.id,
                                         sForegroundAtlasTexture.id);
@@ -2848,7 +2864,8 @@ void DioramaGL_DrawBattleWorld(float cameraX, float cameraZ, float pitch, float 
                               ((uint64_t)DioramaGLBuildings_GetGeometryGeneration() << 32)
                               | (DioramaGLTerrain_GetGeometryGeneration()
                                ^ DioramaGLTreeSprites_GetGeometryGeneration() * 2654435761u
-                               ^ DioramaGLProps_GetGeometryGeneration() * 40503u)))
+                               ^ DioramaGLProps_GetGeometryGeneration() * 40503u
+                               ^ DioramaGLTerrain_TreeLodGeneration() * 2246822519u)))
     {
         DioramaGLTerrain_DrawShadow(sAtlasTexture.id, sBaseAtlasTexture.id,
                                     sForegroundAtlasTexture.id);

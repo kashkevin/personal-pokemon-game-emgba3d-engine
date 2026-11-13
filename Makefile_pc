@@ -878,6 +878,7 @@ check-diorama-tools:
 	python3 -W ignore tools/diorama_buildings/test_bare_twin.py
 	python3 -W ignore tools/diorama_buildings/test_wall_void.py
 	python3 -W ignore tools/diorama_buildings/test_battle_room_auto.py
+	python3 tools/diorama_tree/test_compile_vox.py
 endif
 
 # Assembler data includes (.include/.incbin/#include), scanned like the GBA build.

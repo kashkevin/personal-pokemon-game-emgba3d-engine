@@ -296,7 +296,17 @@ enum DioramaTreeFacing
     DIORAMA_TREE_FACING_NORTH,
     DIORAMA_TREE_FACING_SOUTH
 };
+/*
+ * The tree's coarser models for distant trees and the sun's shadows (KNOWN_ISSUES MS-244; compile_vox.py
+ * LOD_BLOCKS): level 0 is the whole model (BuildTreeModel), 1 to DIORAMA_TREE_MODEL_LODS its voxels in larger
+ * blocks, placed as the whole model is.
+ */
+bool DioramaTerrain_BuildTreeModelLod(unsigned level, struct DioramaTerrainVertex *vertices,
+                                      uint32_t capacity, uint32_t *vertexCount,
+                                      struct DioramaTerrainBounds *bounds);
 uint32_t DioramaTerrain_TreeModelFaceCount(void);
+/* The coarser models' faces, all levels together. */
+uint32_t DioramaTerrain_TreeModelLodFaces(void);
 enum DioramaTreeFacing DioramaTerrain_TreeModelFacing(uint32_t face);
 /*
  * A jump ledge's top at a pixel of its cell, in voxels, between the grounds of
@@ -337,6 +347,16 @@ void DioramaTerrain_PrepareView(struct DioramaTerrainView *view, float cameraX, 
                                 float cameraPitch, float focalLength);
 bool DioramaTerrain_IsBoundsInView(const struct DioramaTerrainView *view, const struct DioramaTerrainBounds *bounds);
 /*
+ * A voxel tree's level of detail on a view (gl_terrain_renderer.c, KNOWN_ISSUES MS-244): 0 (the whole model) while
+ * its depth along the view is under nearRatio times targetDepth (the depth the picture shows the player at), 1 under
+ * farRatio times, 2 past - a block of the coarser model no larger on the picture than a voxel by the player. With
+ * offPicture, a tree neither on the view's picture nor within `margin` tiles of it is 2 (the sun's shadows: its own
+ * cannot reach the picture). `bounds` is the tree's place.
+ */
+int DioramaTerrain_TreeLodLevel(const struct DioramaTerrainView *view, float targetDepth,
+                                const struct DioramaTerrainBounds *bounds, float nearRatio, float farRatio,
+                                bool offPicture, float margin);
+/*
  * A chunk's mesh drawn from indices (performance, 2026-10-12): a quad is two
  * triangles, six vertices of which two repeat its corners 0 and 2. Folds the
  * vertices in place to four per quad (a triangle that shares no corners that
@@ -366,6 +386,9 @@ struct DioramaCameraRig
     /* The window's aspect correction, for the culling (the overworld's
      * culling keeps its 240-wide frustum). */
     float aspectCorrection;
+    /* The depth along the view (tiles) at which the picture shows its subject - the player, the battle's middle;
+     * 0 for none. The voxel trees' levels of detail measure from it (gl_terrain_renderer.c, KNOWN_ISSUES MS-244). */
+    float targetDepth;
 };
 extern struct DioramaCameraRig gDioramaCameraRig;
 
