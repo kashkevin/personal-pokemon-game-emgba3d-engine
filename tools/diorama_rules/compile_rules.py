@@ -1660,10 +1660,18 @@ MOUNTAIN_LEVELS: dict[str, dict] = {
 # Terraces of ordinary ground whose stairs are the GBA's only sign of their levels, levelled by them
 # (terrace_topology.climb_levels; KNOWN_ISSUES MS-247): Mt. Pyre's exterior, a mountain of grass terraces climbing to
 # its summit's graves, lay on one level, its five staircases flat between them; each terrace now stands a level over
-# the one its stairs climb from (the base at the foot of the first, the summit four levels up). "per_row": a level each
-# row of a climb (False: a level a climb).
+# the one its stairs climb from (the base at the foot of the first, the summit four levels up). Birth Island's top a
+# level over its landing, up the stairs through its rock face; Mossdeep City's Space Center on its hill two flights
+# over the town (the rock round the hill a field of cubes before, now slopes). Tried and left out, each worse in 3D:
+# Mt. Pyre's summit (the terrace solver's courses step down from its main level to its side paths, which the climbs
+# would raise two levels over them), Southern Island (its wood between the terraces would stand on several levels,
+# pits in its canopy), Lilycove City (a lawn east of its stairs, closed in by its ledges, a pit under the raised
+# ground round it), the Battle Frontier's east (the rock beside the Battle Pyramid's raised plaza rising into a thin
+# wall). "per_row": a level each row of a climb (False: a level a climb).
 CLIMB_LEVELS: dict[str, dict] = {
     "LAYOUT_MT_PYRE_EXTERIOR": {"per_row": False},
+    "LAYOUT_BIRTH_ISLAND_EXTERIOR": {"per_row": False},
+    "LAYOUT_MOSSDEEP_CITY": {"per_row": False},
 }
 # Towns of terraces whose streets the GBA gives one elevation, their stairs the only sign of their levels
 # (terrace_topology.stair_terraces; KNOWN_ISSUES MS-172): Sootopolis City's crater of terraces round its lake lay flat,

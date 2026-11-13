@@ -615,6 +615,40 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertEqual([(at(29, y)["groundQ16"], at(29, y)["topQ16"]) for y in (0, 1, 2)],
                          [(-16, -16), (-16, 0), (0, 16)])
 
+    def test_repository_terraces_their_stairs_climb_to_stand_over_each_other(self):
+        # KNOWN_ISSUES MS-247 (the owner's picture of Route 119, 2026-11-13: "the third floor doesn't look 3d"):
+        # terraces of ordinary ground whose stairs are the GBA's only sign of their levels (compile_rules
+        # CLIMB_LEVELS): Mt. Pyre's exterior climbs a level a staircase from its foot to the summit four levels up,
+        # Birth Island's top stands a level over its landing, Mossdeep City's Space Center two flights over the street
+        # at its stairs' foot; each staircase rises from the level at its foot to the one at its top.
+        def layout(symbol):
+            row = next(row for row in self.data["layouts"] if row["symbol"] == symbol)
+            records = {record["cellOffset"]: record for record in row["terrainRecords"] if record["mapGroup"] == 0xFF}
+
+            def at(x, y):
+                record = records[y * row["width"] + x]
+                return record["shape"], record["groundQ16"], record["topQ16"]
+            return at
+
+        at = layout("LAYOUT_MT_PYRE_EXTERIOR")
+        self.assertEqual([at(20, 44), at(12, 39), at(15, 36), at(15, 27), at(12, 18), at(20, 12)],
+                         [("flat", 0, 0), ("flat", 0, 0), ("flat", 16, 16), ("flat", 32, 32), ("flat", 48, 48),
+                          ("flat", 64, 64)])
+        self.assertEqual([at(20, 16), at(20, 15), at(9, 33)[1], at(9, 29)[2]],
+                         [("stairs", 48, 56), ("stairs", 56, 64), 16, 32])
+        at = layout("LAYOUT_BIRTH_ISLAND_EXTERIOR")
+        self.assertEqual([at(15, 22), at(15, 10), at(15, 6)], [("flat", 0, 0), ("flat", 16, 16), ("flat", 16, 16)])
+        self.assertEqual([at(15, y) for y in (19, 18, 17)],
+                         [("stairs", 0, 5), ("stairs", 5, 11), ("stairs", 11, 16)])
+        at = layout("LAYOUT_MOSSDEEP_CITY")
+        street = at(64, 23)[1]
+        self.assertEqual([at(64, 20), at(62, 16), at(60, 7)],
+                         [("flat", street + 16, street + 16), ("flat", street + 32, street + 32),
+                          ("flat", street + 32, street + 32)])
+        self.assertEqual([at(64, y)[1:] for y in (22, 21, 19, 18)],
+                         [(street, street + 8), (street + 8, street + 16), (street + 16, street + 24),
+                          (street + 24, street + 32)])
+
     def test_repository_fortree_city_tree_houses_stand_a_level_up(self):
         # Fortree City (the 3D sweep of 2026-11-09, MS-222's kind): its six tree houses, their porches and the plank
         # bridges between them stand a level over the forest floor in the GBA's drawing (the walkways' elevation 4

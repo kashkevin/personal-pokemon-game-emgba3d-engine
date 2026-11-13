@@ -626,6 +626,54 @@ class TerraceTopologyTests(unittest.TestCase):
         self.assertEqual([(at(20, y)["groundQ16"], at(20, y)["topQ16"]) for y in (16, 15)], [(48, 56), (56, 64)])
         self.assertEqual((at(9, 33)["groundQ16"], at(9, 29)["topQ16"]), (16, 32))
 
+    def test_birth_island_climbs_from_its_landing(self):
+        # compile_rules CLIMB_LEVELS: Birth Island's top a level over its landing, up the stairs through its rock face.
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        behavior_ids = parse_behaviors(ROOT / "include/constants/metatile_behaviors.h")
+        behavior_names = {value: name for name, value in behavior_ids.items()}
+        rows = [row for row in layouts if row["id"] == "LAYOUT_BIRTH_ISLAND_EXTERIOR"]
+        cells, _, _ = _load_cells(ROOT, rows, tilesets, behavior_names)
+        width, height = rows[0]["width"], rows[0]["height"]
+        island = cells["LAYOUT_BIRTH_ISLAND_EXTERIOR"]
+        solved = solve_layout(island, width, height)
+        self.assertEqual(solved, {})                                   # no other solver levels it
+        raised = climb_levels(island, width, height, solved)
+
+        def at(x, y):
+            return raised.get(y * width + x)
+
+        for x, y in ((15, 6), (15, 10), (6, 16), (25, 16)):
+            self.assertEqual((at(x, y)["groundQ16"], at(x, y)["profile"]), (MOUNTAIN_LEDGE_Q16, "none"), (x, y))
+        self.assertIsNone(at(15, 22))                                   # the landing
+        self.assertEqual([(at(15, y)["groundQ16"], at(15, y)["topQ16"]) for y in (19, 18, 17)],
+                         [(0, 5), (5, 11), (11, 16)])
+
+    def test_mossdeeps_space_center_stands_two_flights_over_the_town(self):
+        # compile_rules CLIMB_LEVELS: the Space Center's hill two levels over the town, its two flights of stairs a
+        # level each, the landing between them on the first; the town (the terrace solver's) left as it is.
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        behavior_ids = parse_behaviors(ROOT / "include/constants/metatile_behaviors.h")
+        behavior_names = {value: name for name, value in behavior_ids.items()}
+        rows = [row for row in layouts if row["id"] == "LAYOUT_MOSSDEEP_CITY"]
+        cells, _, _ = _load_cells(ROOT, rows, tilesets, behavior_names)
+        width, height = rows[0]["width"], rows[0]["height"]
+        town = cells["LAYOUT_MOSSDEEP_CITY"]
+        solved = solve_layout(town, width, height)
+        raised = climb_levels(town, width, height, solved)
+        self.assertFalse(set(raised) & set(solved))                    # nothing the terrace solver placed moves
+
+        def at(x, y):
+            return raised.get(y * width + x)
+
+        for (x, y), level in (((62, 16), 2), ((60, 7), 2), ((70, 12), 2), ((64, 20), 1)):
+            self.assertEqual((at(x, y)["groundQ16"], at(x, y)["profile"]), (MOUNTAIN_LEDGE_Q16 * level, "none"),
+                             (x, y))
+        self.assertIsNone(at(64, 23))                                   # the street at the stairs' foot
+        self.assertEqual([(at(64, y)["groundQ16"], at(64, y)["topQ16"]) for y in (22, 21, 19, 18)],
+                         [(0, 8), (8, 16), (16, 24), (24, 32)])
+
     def test_a_caves_muddy_slope_climbs_from_one_part_of_its_floor_to_another(self):
         # Granite Cave B1F: its halves, at one elevation, are joined only by a muddy slope. The
         # part at its top (north) stands a level up, the slope rising over its rows; a cave with
