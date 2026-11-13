@@ -12,7 +12,7 @@ from terrace_topology import (CAVE_RISE_Q16, LEDGE_JUMPS, MOUNTAIN_LEDGE_Q16, SL
                               join_level_free_cells, join_water, lift_blocked_cells,
                               hall_stairs, hand_banks, hand_decks, hand_floors, hand_ridges, hand_slopes,
                               indoor_levels,
-                              mountain_by_hand, stair_runs_between, stair_terraces,
+                              climb_levels, mountain_by_hand, stair_runs_between, stair_terraces,
                               mountain_ledges, pass_levels, rock_tops, role_for_cell, seam_shifts, slope_tops,
                               solve_layout)
 
@@ -544,6 +544,87 @@ class TerraceTopologyTests(unittest.TestCase):
         rows = ["RRRRRRR", "RTTTRTR", "RTTTRRR", "RRRRRRR", "GGGGGGG"]
         cells = tuple(make[ch]() for row in rows for ch in row)
         self.assertEqual(mountain_ledges(cells, 7, 5, {}), {})
+
+    def test_stairs_between_ordinary_ground_level_the_terraces_they_join(self):
+        # climb_levels (compile_rules CLIMB_LEVELS; KNOWN_ISSUES MS-247): terraces of ordinary ground (no
+        # MB_MOUNTAIN_TOP, no terrace course) whose stairs are the GBA's only sign of their levels - Mt. Pyre's
+        # exterior. mountain_ledges leaves them to the terrace solver (nothing); climb_levels raises the ground at a
+        # climb's top a level over the ground at its foot, the stairs rising between.
+        def rock():
+            return dict(cell(1), collision=1)
+
+        def grass():
+            return dict(cell(1), collision=0, elevation=3)
+
+        def stairs():
+            return dict(cell(175), collision=0, elevation=3)
+
+        make = {"R": rock, "G": grass, "S": stairs}
+
+        def layout(rows):
+            return tuple(make[ch]() for row in rows for ch in row), len(rows[0]), len(rows)
+
+        cells, width, height = layout(["GGGGG", "RRSRR", "GGGGG"])
+        self.assertEqual(mountain_ledges(cells, width, height, {}), {})
+        raised = climb_levels(cells, width, height, {})
+        self.assertEqual({offset for offset, entry in raised.items() if entry["profile"] == "none"}, set(range(5)))
+        self.assertEqual({raised[offset]["groundQ16"] for offset in range(5)}, {MOUNTAIN_LEDGE_Q16})
+        self.assertEqual((raised[7]["groundQ16"], raised[7]["topQ16"], raised[7]["profile"]),
+                         (0, MOUNTAIN_LEDGE_Q16, "transition-horizontal"))
+        self.assertFalse(set(range(10, 15)) & set(raised))           # the foot keeps its level
+        # A climb from a climb's top: a level a climb; a climb of two rows rises its one level over them (with
+        # `per_row`, a level a row: the GBA's heights).
+        cells, width, height = layout(["GGGGG", "RRSRR", "GGGGG", "RRSRR", "RRSRR", "GGGGG"])
+        raised = climb_levels(cells, width, height, {})
+        self.assertEqual((raised[0]["groundQ16"], raised[10]["groundQ16"]),
+                         (2 * MOUNTAIN_LEDGE_Q16, MOUNTAIN_LEDGE_Q16))
+        self.assertEqual([(raised[offset]["groundQ16"], raised[offset]["topQ16"]) for offset in (22, 17)],
+                         [(0, 8), (8, 16)])
+        raised = climb_levels(cells, width, height, {}, per_row=True)
+        self.assertEqual((raised[0]["groundQ16"], raised[10]["groundQ16"]),
+                         (3 * MOUNTAIN_LEDGE_Q16, 2 * MOUNTAIN_LEDGE_Q16))
+        # Climbs that give one terrace two levels (from two feet on the ground, one climb and two) raise nothing,
+        # as no climb at all.
+        cells, width, height = layout(["GGGGGGG", "RSRRRSR", "GGGRGGG", "RRRRRSR", "RRRRGGG"])
+        self.assertEqual(climb_levels(cells, width, height, {}), {})
+        cells, width, height = layout(["GGGGG", "RRRRR", "GGGGG"])
+        self.assertEqual(climb_levels(cells, width, height, {}), {})
+        # A terrace whose south edge meets lower walkable ground (another elevation: no face drawn there) raises
+        # nothing.
+        cells, width, height = layout(["GGGGG", "GRSRR", "GGGGG"])
+        cells = tuple(dict(entry, elevation=4) if offset == 10 else entry for offset, entry in enumerate(cells))
+        self.assertEqual(climb_levels(cells, width, height, {}), {})
+
+    def test_mt_pyre_exterior_climbs_four_terraces_to_its_summit(self):
+        # The owner's picture of Route 119 (2026-11-13, "the third floor doesn't look 3d"); Mt. Pyre's exterior lay
+        # on one level the same way, its five staircases flat. Its terraces now climb a level a staircase: the two
+        # grounds at the foot of its first stairs on level 0, the summit's graves four levels up.
+        tilesets = load_tilesets(ROOT)
+        _, layouts = load_world(ROOT)
+        behavior_ids = parse_behaviors(ROOT / "include/constants/metatile_behaviors.h")
+        behavior_names = {value: name for name, value in behavior_ids.items()}
+        rows = [row for row in layouts if row["id"] == "LAYOUT_MT_PYRE_EXTERIOR"]
+        cells, _, _ = _load_cells(ROOT, rows, tilesets, behavior_names)
+        width, height = rows[0]["width"], rows[0]["height"]
+        pyre = cells["LAYOUT_MT_PYRE_EXTERIOR"]
+        solved = solve_layout(pyre, width, height)
+        self.assertEqual(solved, {})                                   # neither solver gave it levels
+        self.assertEqual(mountain_ledges(pyre, width, height, solved), {})
+        raised = climb_levels(pyre, width, height, solved)
+
+        def at(x, y):
+            return raised.get(y * width + x)
+
+        for (x, y), level in (((20, 12), 4), ((27, 15), 4), ((12, 18), 3), ((20, 19), 3), ((15, 27), 2),
+                              ((25, 24), 2), ((15, 36), 1), ((28, 37), 1)):
+            self.assertEqual((at(x, y)["groundQ16"], at(x, y)["profile"]), (MOUNTAIN_LEDGE_Q16 * level, "none"),
+                             (x, y))
+        for x, y in ((20, 44), (12, 39), (18, 40)):                    # the two grounds at the foot
+            self.assertIsNone(at(x, y), (x, y))
+        # the summit's stairs rise from the third level to the fourth over their two rows; the long west stairs
+        # from the first to the second over their five
+        self.assertEqual([(at(20, y)["groundQ16"], at(20, y)["topQ16"]) for y in (16, 15)], [(48, 56), (56, 64)])
+        self.assertEqual((at(9, 33)["groundQ16"], at(9, 29)["topQ16"]), (16, 32))
 
     def test_a_caves_muddy_slope_climbs_from_one_part_of_its_floor_to_another(self):
         # Granite Cave B1F: its halves, at one elevation, are joined only by a muddy slope. The

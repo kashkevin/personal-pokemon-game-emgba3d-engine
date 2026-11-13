@@ -352,6 +352,33 @@ def mountain_ledges(cells: tuple[dict, ...], width: int, height: int,
     return out
 
 
+def climb_levels(cells: tuple[dict, ...], width: int, height: int,
+                 solved: dict[int, dict], per_row: bool = False) -> dict[int, dict]:
+    """Terraces of ordinary ground whose stairs are the GBA's only sign of their levels (compile_rules CLIMB_LEVELS;
+    KNOWN_ISSUES MS-247: Mt. Pyre's exterior, a mountain of grass terraces climbing to its summit, lay on one level, its
+    staircases flat between them - as Route 119's grass bank over its plateau, the owner's picture of 2026-11-13). As
+    mountain_ledges, for every region its climbs join (not only a mountain's tops): each a level over the region at
+    its stairs' foot (with `per_row`, a level each row of the climb), the regions at the foot of a climb that are no
+    climb's top on level 0, the climbs rising between them. Nothing where the climbs give a region two levels or a
+    step falls where the game draws none (_steps_hold). Returns the raised regions' and the climbs' entries."""
+    stairs, region_of, regions, runs = _climb_regions(cells, width, height, solved, _climb)
+    if not runs:
+        return {}
+    tops = {upper for upper, _, _ in runs}
+    base = {lower for _, lower, _ in runs if lower not in tops}
+    level = _climb_levels(runs, base, width, per_row)
+    if level is None or not _steps_hold(cells, width, region_of, level):
+        return {}
+    out: dict[int, dict] = {}
+    for index, value in level.items():
+        if value:
+            for offset in regions[index]:
+                out[offset] = {"groundQ16": MOUNTAIN_LEDGE_Q16 * value, "topQ16": MOUNTAIN_LEDGE_Q16 * value,
+                               "profile": "none", "solid": False}
+    out.update(_climb_entries(runs, level, width, MOUNTAIN_LEDGE_Q16, per_row))
+    return out
+
+
 def join_level_free_cells(cells: tuple[dict, ...], width: int, height: int,
                           solved: dict[int, dict],
                           beside: frozenset[int] | None = None) -> dict[int, dict]:

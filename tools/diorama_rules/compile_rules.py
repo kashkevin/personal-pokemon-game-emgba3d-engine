@@ -28,7 +28,7 @@ from structures import analyze_layout
 from terrace_topology import (WATER_BEHAVIORS, cave_climbs, cave_hand_levels, cave_levels, cave_stairs,
                               contradiction_ramps,
                               course_ridges, hall_stairs, hand_banks, hand_decks, hand_floors, hand_ridges, hand_slopes,
-                              indoor_levels, mountain_by_hand, stair_runs_between, stair_terraces,
+                              climb_levels, indoor_levels, mountain_by_hand, stair_runs_between, stair_terraces,
                               join_level_free_cells,
                               join_water,
                               lift_blocked_cells, mountain_ledges, pass_levels, rock_tops, seam_shifts,
@@ -1657,6 +1657,14 @@ MOUNTAIN_LEVELS: dict[str, dict] = {
                         "climbs": (((5, 79, 6, 80), "s", -16, 16), ((30, 97, 31, 97), "n", 0, 16),
                                    ((21, 48, 22, 48), "n", 0, 16))},
 }
+# Terraces of ordinary ground whose stairs are the GBA's only sign of their levels, levelled by them
+# (terrace_topology.climb_levels; KNOWN_ISSUES MS-247): Mt. Pyre's exterior, a mountain of grass terraces climbing to
+# its summit's graves, lay on one level, its five staircases flat between them; each terrace now stands a level over
+# the one its stairs climb from (the base at the foot of the first, the summit four levels up). "per_row": a level each
+# row of a climb (False: a level a climb).
+CLIMB_LEVELS: dict[str, dict] = {
+    "LAYOUT_MT_PYRE_EXTERIOR": {"per_row": False},
+}
 # Towns of terraces whose streets the GBA gives one elevation, their stairs the only sign of their levels
 # (terrace_topology.stair_terraces; KNOWN_ISSUES MS-172): Sootopolis City's crater of terraces round its lake lay flat,
 # its white rock walls standing one to three levels over every street. Its streets now climb a level a flight of its
@@ -2213,6 +2221,14 @@ def compile_data(root: Path) -> dict:
                 # A lobby's stage or upper floor, given by hand (terrace_topology.indoor_levels).
                 solved = {**solved, **indoor_levels(cells[layout["id"]], layout["width"], layout["height"],
                                                     INDOOR_LEVELS[layout["id"]], solved)}
+        if layout["id"] in CLIMB_LEVELS:
+            # Terraces of ordinary ground levelled by their stairs (terrace_topology.climb_levels: Mt. Pyre's
+            # exterior); a spec that gives no levels any more is an error, not a silent flat map.
+            climbs = climb_levels(cells[layout["id"]], layout["width"], layout["height"], solved,
+                                  per_row=CLIMB_LEVELS[layout["id"]].get("per_row", False))
+            if not climbs:
+                raise RuleError(f"{layout['id']}: CLIMB_LEVELS gives it no levels")
+            solved = {**solved, **climbs}
         if (rows and all(_outdoor(row["mapType"]) for row in rows)
                 and any(cell.get("behavior") == "MB_MOUNTAIN_TOP" and cell.get("collision")
                         for cell in cells[layout["id"]])):
