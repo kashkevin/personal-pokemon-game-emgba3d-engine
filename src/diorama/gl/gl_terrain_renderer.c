@@ -3549,7 +3549,11 @@ static bool CellAsBefore(const struct DioramaSceneSnapshot *snapshot, const stru
  * sign at the edge of an input (its ground its neighbours') took another
  * ground when the cell beside it came into the grid, and its chunk stood with
  * the input it had had (the terrain check's stale chunks on two of Mr.
- * Briney's sails, KNOWN_ISSUES MS-82).
+ * Briney's sails, KNOWN_ISSUES MS-82). So does blocked ground on the edge
+ * while raised tops' corners are shaped (ShapeEdgeCorners reads its four
+ * neighbours' ground and kind: the terrain check's reports of a stale chunk
+ * in run 457, 3 at the four map seams and 8 on Mr. Briney's sail,
+ * KNOWN_ISSUES MS-248).
  */
 static bool RegionUnchanged(const struct DioramaSceneSnapshot *snapshot,
                             const struct DioramaResolvedCell *resolvedCells,
@@ -3576,7 +3580,9 @@ static bool RegionUnchanged(const struct DioramaSceneSnapshot *snapshot,
                 return false;
             if ((x != 0 && y != 0 && x != DIORAMA_TERRAIN_INPUT_SIZE - 1 && y != DIORAMA_TERRAIN_INPUT_SIZE - 1)
              || (resolvedCells[index].shape != DIORAMA_SHAPE_LEDGE
-              && DioramaProps_ForCell(snapshot, &snapshot->cells[index]) == NULL))
+              && DioramaProps_ForCell(snapshot, &snapshot->cells[index]) == NULL
+              && !(EdgeCornersOn() && snapshot->cells[index].collision != 0
+                   && resolvedCells[index].archetype == DIORAMA_ARCHETYPE_GROUND)))
                 continue;
             for (dy = -1; dy <= 1; dy++)
                 for (dx = -1; dx <= 1; dx++)
