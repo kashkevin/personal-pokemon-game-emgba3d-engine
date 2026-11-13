@@ -1484,6 +1484,9 @@ RIDGE_LAYOUTS: frozenset[str] = frozenset()
 # of 2026-11-09).
 SCENERY_COURSES: dict[str, tuple[tuple[int, int], ...]] = {
     "LAYOUT_SAFARI_ZONE_SOUTH": tuple((x, 2) for x in range(18, 26)) + ((35, 7), (36, 7)),
+    # Navel Rock's outside (KNOWN_ISSUES MS-249): five of General's terrace course pieces in the west side of the rock
+    # in the middle of its sand (HAND_LEVELS'), which the solver read as the rim of a terrace a level under the rest.
+    "LAYOUT_NAVEL_ROCK_EXTERIOR": ((7, 7), (7, 8), (7, 9), (8, 9), (8, 10)),
 }
 # The Safari Zone's north-east (the owner's choice of 2026-11-01: "Real terraces + slope at edge"): its terraces
 # step down three levels from the north to its south edge, where the south-east meets it at the level the rest of
@@ -1613,6 +1616,20 @@ HAND_LEVELS: dict[str, dict] = {
         "slopes": (((10, 5, 10, 6), "n", 0, 16), ((25, 5, 25, 6), "n", 0, 16), ((32, 5, 32, 6), "n", 0, 16),
                    ((12, 15, 12, 16), "n", 0, 16), ((37, 15, 37, 16), "n", 0, 16)),
         "decks": ((13, 4, 14, 4), (20, 4, 22, 4), (28, 4, 29, 4), (15, 14, 34, 14)),
+    },
+    # Navel Rock's outside (KNOWN_ISSUES MS-249): the GBA draws its pier's stairs (General's 175 and 207, 9-11, 13)
+    # climbing north through the island's rocky rim to the sand inside it - a courtyard before the cave's mouth in the
+    # rock in the middle, the sand round that rock - and the rim's faces rising over the sand. The solver read the
+    # rock's west side (SCENERY_COURSES') as the rim of a terrace and laid the courtyard and a path by it a level
+    # under the pier, the rest on the pier's level: the player stepped a level down off the stairs. Inside the rim
+    # (5-15, 3-12) the sand, the rock and the rim stand a level over the pier, the stairs climbing to them; the five
+    # pieces stay the faces the solver makes of scenery (course_ridges), their tops on the sand's level. A first try
+    # (2026-11-13) laid those pieces with the rest of the rock: they stood as a block a tile high and flat squares.
+    "LAYOUT_NAVEL_ROCK_EXTERIOR": {
+        "floors": (((5, 3, 15, 12), 16),),
+        "banks": (((5, 3, 15, 6), 16), ((5, 7, 6, 8), 16), ((8, 7, 15, 8), 16), ((5, 9, 6, 9), 16),
+                  ((9, 9, 15, 9), 16), ((5, 10, 7, 10), 16), ((9, 10, 15, 10), 16), ((5, 11, 15, 12), 16)),
+        "slopes": (((9, 13, 11, 13), "n", 0, 16),),
     },
 }
 # The layouts whose blocked cells lift_blocked_cells leaves where they are: Fortree City's forest stays on its floor
