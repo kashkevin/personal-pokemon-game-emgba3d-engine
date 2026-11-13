@@ -93,7 +93,16 @@ faces of the walls in its column, the outside ends it, and a stretch with no flo
 (furniture against the edge) stands none (KNOWN_ISSUES MS-232: before, it ran from the shallowest
 back wall's foot through all of them - in the black either side of the Mauville Gym's alcove,
 its cells drawn with the floor's yellow, and from inside the Battle Tower's back walls, its far
-end showing over them).
+end showing over them). The Facility tileset's stairwell - the flight up, three cells on a back
+wall's two rows: Mt. Pyre 1F-5F, Team Aqua's hideout B1F and B2F, the Space Center 1F - is
+modelled by hand (`battle_room_auto.STAIRWELL`; KNOWN_ISSUES MS-237): read as walls, its lintel
+stood a row behind its posts and half as tall, and the 3D cameras saw the outside black over it,
+down the posts' inner edges and in a wedge beside a taller side wall. Its frame, the lintel and
+the posts, is one wall on the stairwell's foot with its doorway open; the doorway's recess stands
+behind it in the flight's dark (`voxel_building_specs.stairwell`, as a house's stairs); a taller
+wall beside it carries its side on to the frame's face (`voxel_building.Cheek`). Nothing rises
+above the row the walls' tops are drawn on, so the room is its drawing again at 45 degrees, and
+the walls round it keep their heights.
 
 What the proof cannot see: it compares the picture the GBA's camera sees. A piece that gives
 back its drawing exactly can still be wrong from the battle camera's angle - the survey's

@@ -40,6 +40,11 @@ def _helpers():
     import voxel_building_specs as v   # at call time: that module imports the battle rooms
     return v.own_shell, v.piece
 
+
+def _stairwell():
+    import voxel_building_specs as v
+    return v.stairwell
+
 MAX_WALL = 48       # rows of a wall's face that stand; more of a drawn wall is its top
 THING = 20          # rows of front a piece of furniture stands at most
 DARK = 40           # a pixel at most this bright is the black outside a room
@@ -85,6 +90,47 @@ STAND = {
 LEVEL_WALL = {
     "LAYOUT_SOOTOPOLIS_CITY_GYM_1F": 32,
 }
+
+# Stairwells modelled by hand, by their metatiles (the secondary tileset's): the Facility tileset's
+# flight up, three cells wide on a back wall's two rows - Mt. Pyre's floors 1F-5F, Team Aqua's
+# hideout B1F and B2F, the Space Center 1F. The reader stood its outer columns (the posts and the
+# lintel's ends, 32 rows) on the wall's foot and its middle column, the lintel one row tall over the
+# flight's own cell, a row back and 16 rows tall: at the GBA's 45 degrees their tops line up, but
+# from the 3D cameras the lintel's top lay below the posts', the outside black over it and down the
+# posts' inner edges (a wall's face has no sides), and, beside a floor's taller side wall whose top
+# starts a row behind the stairwell's face, in a wedge between the two (KNOWN_ISSUES MS-237; the
+# owner's decision #56 of 2026-11-13: a model of the stairwell by hand closing its sides, the walls
+# round it keeping their heights). By hand (stairwell_pieces): the frame - the lintel, 12 rows, and
+# the posts, 8 columns each - one wall on the stairwell's foot, its doorway open; the doorway's
+# recess behind it, its sides and back in the flight's dark, as a house's stairs are
+# (voxel_building_specs.stairwell); and a taller wall beside it carries its side on to the frame's
+# face (a cheek, its top on the row the walls' tops are drawn on). At 45 degrees the room is its
+# drawing again; nothing rises above the walls' tops; the walls round it keep their heights.
+STAIRWELL = {
+    "gTileset_Facility": ((0x2B3, 0x2B4, 0x2B5), (0x2BB, 0x2BC, 0x2BD)),
+}
+STAIRWELL_LINTEL = 12   # rows of the lintel over the doorway (its white top, its face, its shadow)
+STAIRWELL_POST = 8      # columns of each post beside the doorway
+
+
+def stairwells(layout, walls):
+    """[(x, y)] of the stairwells (STAIRWELL) a layout has whose columns the reader read as the
+    frame's walls - the posts' runs two rows from the wall's top, the middle's one - and the
+    (column, ya, yb) runs they stand for; a stairwell read otherwise is left to the reader."""
+    tiles = STAIRWELL.get(layout.secondary)
+    found, runs = [], set()
+    if not tiles:
+        return found, runs
+    for y in range(layout.h - 1):
+        for x in range(layout.w - 2):
+            if not all(layout.metatile(x + i, y) == tiles[0][i]
+                       and layout.metatile(x + i, y + 1) == tiles[1][i] for i in range(3)):
+                continue
+            mine = [(x, y, y + 2), (x + 1, y, y + 1), (x + 2, y, y + 2)]
+            if all(c in walls.get((ya, yb), ()) for (c, ya, yb) in mine):
+                found.append((x, y))
+                runs.update(mine)
+    return found, runs
 
 
 _BEHAVIOURS = None
@@ -313,6 +359,10 @@ def analyse(layout_id, taken=(), drop=()):
     for (ya, yb), cols in walls.items():
         heights[min(max_wall, (yb - ya) * 16)] += len(cols)
     wall_h = heights.most_common(1)[0][0] if heights else 32
+    # stairwells modelled by hand (STAIRWELL): their columns' runs are theirs, not walls'
+    hand_stairs, hand_runs = stairwells(L, walls)
+    for (sx, sy) in hand_stairs:
+        notes.append("stairwell by hand: columns %d-%d, rows %d-%d" % (sx, sx + 2, sy, sy + 1))
 
     pieces = []
     # things and edges: connected blocked cells that are not a wall's face
@@ -349,7 +399,9 @@ def analyse(layout_id, taken=(), drop=()):
     def wall_pieces():
         out = []
         for k, ((ya, yb), cols) in enumerate(sorted(walls.items(), key=lambda kv: (kv[0], kv[1][0]))):
-            cols = sorted(cols)
+            cols = sorted(c for c in cols if (c, ya, yb) not in hand_runs)
+            if not cols:
+                continue
             # contiguous runs of columns
             start = prev = cols[0]
             for c in cols[1:] + [None]:
@@ -431,8 +483,46 @@ def analyse(layout_id, taken=(), drop=()):
                              solid=True, side=(x0, foot - min(tall, 16), x0 + 16, foot)))
         return out
 
+    def stairwell_pieces(walls_built):
+        """The stairwells' frames and recesses (STAIRWELL), and the cheeks of the taller walls
+        beside them: a wall standing on the stairwell's top row whose top starts behind the
+        frame's face (a floor's side wall, 48 rows of face on a longer run) carries its side on
+        from where its top starts to the frame's face, its top on that row at 45 degrees (h = z -
+        the row), drawn with the wall's own edge column as its side is (vb.Cheek)."""
+        stairwell = _stairwell()
+        out = []
+        for (sx, sy) in hand_stairs:
+            X, Y = sx * 16, sy * 16
+            foot = Y + 32
+            lintel, post = Y + STAIRWELL_LINTEL, STAIRWELL_POST
+            # the doorway's recess, its far ends open; its sides and back the flight's dark (the
+            # doorway's top rows under the lintel)
+            recess = stairwell("stairwell_%d_%d" % (sx, sy), X + post, X + 48 - post, foot, lintel,
+                               foot - lintel, (X + post + 1, lintel, X + 48 - post - 1, Y + 16), Y)
+            # the doorway's drawing is the flight's, never the room's floor
+            recess["not_floor"] = [(X + post, lintel, X + 48 - post, foot)]
+            out.append(recess)
+            out.append(piece("stairwell_frame_%d_%d" % (sx, sy),
+                             [(X, Y, X + 48, lintel), (X, lintel, X + post, foot),
+                              (X + 48 - post, lintel, X + 48, foot)],
+                             32, fill=16, foot=foot, side=(X, Y, X + 16, foot)))
+            for c, x_edge, facing in ((sx - 1, X, 1), (sx + 3, X + 48, -1)):
+                for pc in walls_built:
+                    (x0, y0, x1, y1) = pc["shape"][0]
+                    if not (x0 <= c * 16 < x1 and y0 == Y):
+                        continue
+                    tall, foot_n = pc["height"], pc["foot"]
+                    back_n = Y + tall if foot_n - Y > tall else foot_n
+                    if back_n > foot:
+                        u = x1 - 0.5 if facing > 0 else x0 + 0.5
+                        pc.setdefault("cheeks", []).append((x_edge, foot, back_n, Y, u, facing))
+                        notes.append("%s: cheek at x %d, z %d-%d" % (pc["name"], x_edge, foot, back_n))
+        return out
+
     pieces += thing_pieces()
-    pieces += wall_pieces()
+    built = wall_pieces()
+    pieces += built
+    pieces += stairwell_pieces(built)
     # the room's sides where its floor reaches the map's edge
     back_foot = min((yb for (ya, yb) in walls), default=None)
     if back_foot is not None:

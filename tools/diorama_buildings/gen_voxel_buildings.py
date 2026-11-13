@@ -677,6 +677,16 @@ def interior_specs(spec):
             if 0 <= nx < W and 0 <= ny < H and match[ny][nx] and not ground[ny][nx]:
                 ground[ny][nx] = True
                 todo.append((nx, ny))
+    # `not_floor`: a doorway's drawing - the flight seen through a stairwell's frame
+    # (battle_room_auto.stairwell_pieces) - is never the room's floor, though a pixel
+    # of it may have the floor's own colour at the floor's own place: the open floor
+    # ran into Mt. Pyre 1F's doorway through two pixels of the flight's bottom row,
+    # which the terrain then drew in its floor's other shade (KNOWN_ISSUES MS-237)
+    for pc in pieces:
+        for (nx0, ny0, nx1, ny1) in pc.get("not_floor", ()):
+            for y in range(max(0, ny0), min(H, ny1)):
+                for x in range(max(0, nx0), min(W, nx1)):
+                    ground[y][x] = False
     # the floor's shaded variants: their colours are floor wherever they run
     # on from the open floor, never a piece's
     shade = set()
@@ -956,6 +966,12 @@ def interior_specs(spec):
             parts.append(vb.PlainWall("%s_side%d%s" % (pc["name"], n, behind),
                                       (wa[0] - ox, wa[1] - oz),
                                       (wb[0] - ox, wb[1] - oz), -1, tall, side))
+        for n, (cx, cz0, cz1, crest, cu, facing) in enumerate(pc.get("cheeks", ())):
+            # a taller wall's side carried on to a stairwell's face beside it
+            # (battle_room_auto.stairwell_pieces; KNOWN_ISSUES MS-237)
+            ox, oz = x0 * 16, y0 * 16
+            parts.append(vb.Cheek("%s_cheek%d" % (pc["name"], n), cx - ox, cz0 - oz, cz1 - oz,
+                                  crest - oz, cu - ox, facing))
         # only the cells with a mark: a quad over nothing but floor draws nothing
         # (its page keeps every texel a quad reads: page_crop)
         local = [(cx - x0, cy - y0) for (cx, cy) in cells

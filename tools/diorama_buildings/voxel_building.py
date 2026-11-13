@@ -1512,6 +1512,30 @@ class Facet:
                   self.name + ".facet~proj")
 
 
+class Cheek:
+    """A wall's side carried on past where its solid starts: in the plane `x`, from z0 to z1, its
+    top on the row `crest` the walls' tops are drawn on (y = z - crest, so at 45 degrees it lies
+    along that row, edge on: it draws nothing of the drawing), textured as a wall's own side is
+    (Relief's flank~proj: the drawing's column `u`, projected). A floor's side wall standing 48
+    rows tall beside a stairwell's 32-row frame starts its top a row behind the frame's face; the
+    3D cameras saw the outside black in the wedge between the two (KNOWN_ISSUES MS-237). `facing`
+    +1 faces east (+x), -1 west."""
+
+    def __init__(self, name, x, z0, z1, crest, u, facing):
+        self.name, self.x, self.z0, self.z1 = name, float(x), float(z0), float(z1)
+        self.crest, self.u, self.facing = float(crest), float(u), facing
+
+    def emit(self, mesh):
+        x, z0, z1 = self.x, self.z0, self.z1
+        t0, t1 = z0 - self.crest, z1 - self.crest
+        if self.facing > 0:
+            quad = [(x, -1.0, z1), (x, -1.0, z0), (x, t0, z0), (x, t1, z1)]
+        else:
+            quad = [(x, -1.0, z0), (x, -1.0, z1), (x, t1, z1), (x, t0, z0)]
+        mesh.poly([(q[0], q[1], q[2], self.u, q[2] - q[1]) for q in quad],
+                  SHADE_EAST if self.facing > 0 else SHADE_WEST, self.name + ".cheek~proj")
+
+
 class PlainWall:
     """A wall the drawing never shows - a room's side wall, edge on to the GBA
     camera - dressed with `tile` at one texel per pixel, laid from `a` to `b`

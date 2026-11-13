@@ -319,5 +319,107 @@ class LevelWallTests(unittest.TestCase):
         self.assertEqual(bra.LEVEL_WALL, {self.LAYOUT: 32})
 
 
+class StairwellTests(unittest.TestCase):
+    """KNOWN_ISSUES MS-237, the owner's decision #56: the Facility tileset's stairwell (Mt. Pyre 1F-5F, Team
+    Aqua's hideout, the Space Center) read as walls stood its lintel a row behind its posts and 16 rows tall:
+    from the 3D cameras the outside black over it, down the posts' inner edges and, beside a taller side wall,
+    in a wedge. By hand: the frame on one foot, its doorway's recess, the taller walls' cheeks - nothing rising
+    above the row the walls' tops are drawn on, so at 45 degrees nothing changes; the walls keep their heights."""
+
+    ROOMS = {
+        "LAYOUT_MT_PYRE_1F": [(10, 0)], "LAYOUT_MT_PYRE_2F": [(9, 0)], "LAYOUT_MT_PYRE_3F": [(1, 0)],
+        "LAYOUT_MT_PYRE_4F": [(9, 0)], "LAYOUT_MT_PYRE_5F": [(1, 0)],
+        "LAYOUT_AQUA_HIDEOUT_B1F": [(28, 0)], "LAYOUT_AQUA_HIDEOUT_B2F": [(11, 0), (17, 0), (2, 2)],
+        "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_1F": [(12, 0)],
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.read = {lid: bra.analyse(lid) for lid in cls.ROOMS}
+
+    def test_the_auto_rooms_with_the_stairwell(self):
+        import battle_room_specs
+        top, low = bra.STAIRWELL["gTileset_Facility"]
+        rooms = {}
+        for lid in battle_room_specs.AUTO_ROOMS:
+            L = vb.LayoutArt(lid)
+            if L.secondary != "gTileset_Facility":
+                continue
+            spots = [(x, y) for y in range(L.h - 1) for x in range(L.w - 2)
+                     if all(L.metatile(x + i, y) == top[i] and L.metatile(x + i, y + 1) == low[i] for i in range(3))]
+            if spots:
+                rooms[lid] = spots
+        self.assertEqual(rooms, self.ROOMS)
+
+    def test_each_stands_as_its_frame_and_recess(self):
+        for lid, spots in self.ROOMS.items():
+            ground, pieces, notes = self.read[lid]
+            names = {pc["name"]: pc for pc in pieces}
+            for (sx, sy) in spots:
+                X, Y = sx * 16, sy * 16
+                frame = names["stairwell_frame_%d_%d" % (sx, sy)]
+                self.assertEqual(frame["shape"], [(X, Y, X + 48, Y + 12), (X, Y + 12, X + 8, Y + 32),
+                                                  (X + 40, Y + 12, X + 48, Y + 32)], lid)
+                # the lintel on the posts' foot, not a row back
+                self.assertEqual((frame["foot"], frame["height"]), (Y + 32, 32), lid)
+                self.assertTrue(frame.get("alone"), lid)
+                recess = names["stairwell_%d_%d" % (sx, sy)]
+                self.assertEqual(recess["inside"], (X + 8, Y + 12, X + 40, Y + 32), lid)
+                # the doorway's drawing is never the room's floor (on 1F two pixels of the flight's bottom
+                # row have the floor's colour at the floor's place: the terrain drew them in its other shade)
+                self.assertEqual(recess["not_floor"], [(X + 8, Y + 12, X + 40, Y + 32)], lid)
+                self.assertTrue(recess.get("alone"), lid)
+                # no wall of the reader's stands in the stairwell's columns
+                for pc in pieces:
+                    if not pc["name"].startswith("wall_"):
+                        continue
+                    x0, y0, x1, y1 = pc["shape"][0]
+                    self.assertFalse(x0 < X + 48 and X < x1 and y0 < Y + 32 and Y < y1, (lid, pc["name"]))
+
+    def test_nothing_rises_above_the_walls_top_row(self):
+        for lid, spots in self.ROOMS.items():
+            ground, pieces, notes = self.read[lid]
+            names = {pc["name"]: pc for pc in pieces}
+            for (sx, sy) in spots:
+                Y = sy * 16
+                for (a, b, h) in names["stairwell_%d_%d" % (sx, sy)]["walls"]:
+                    # at 45 degrees a wall's top at depth z, height h lies on row z - h
+                    self.assertLessEqual(h, min(a[1], b[1]) - Y, (lid, a, b))
+            for pc in pieces:
+                for (x, z0, z1, crest, u, facing) in pc.get("cheeks", ()):
+                    # beside a stairwell's frame: its left edge for a wall west of it, its right edge east
+                    self.assertIn((x // 16 if facing > 0 else x // 16 - 3, crest // 16), spots, (lid, pc["name"]))
+                    # from the frame's face to where the wall's top starts, which is on that row too
+                    self.assertEqual(z0, crest + 32, (lid, pc["name"]))
+                    x0, y0, x1, y1 = pc["shape"][0]
+                    self.assertEqual(y0, crest, (lid, pc["name"]))
+                    self.assertEqual(z1 - crest, pc["height"], (lid, pc["name"]))
+                    self.assertEqual(x, x1 if facing > 0 else x0, (lid, pc["name"]))
+
+    def test_mt_pyre_5f_keeps_its_walls_and_closes_both_wedges(self):
+        ground, pieces, notes = self.read["LAYOUT_MT_PYRE_5F"]
+        names = {pc["name"]: pc for pc in pieces}
+        for name, cheek in (("wall_0_0", (16, 32, 48, 0, 15.5, 1)), ("wall_4_0", (64, 32, 48, 0, 64.5, -1))):
+            pc = names[name]
+            self.assertEqual((pc["height"], pc["foot"]), (48, 128), name)
+            self.assertEqual(pc["cheeks"], [cheek], name)
+        # Team Aqua's hideout B1F: the walls beside its stairwell stand on its foot - no cheek
+        ground, pieces, notes = self.read["LAYOUT_AQUA_HIDEOUT_B1F"]
+        self.assertFalse([pc["name"] for pc in pieces if pc.get("cheeks")])
+
+    def test_a_cheek_lies_on_the_row_and_carries_the_side_on(self):
+        for facing in (1, -1):
+            mesh = vb.Mesh()
+            vb.Cheek("c", 16, 32, 48, 0, 15.5, facing).emit(mesh)
+            self.assertEqual(len(mesh.tris), 2)
+            for (tri, shade, tag) in mesh.tris:
+                self.assertTrue(tag.endswith("~proj"))
+                self.assertEqual(shade, vb.SHADE_EAST if facing > 0 else vb.SHADE_WEST)
+                for (x, y, z, u, v) in tri:
+                    self.assertEqual((x, u, v), (16.0, 15.5, z - y))
+                    self.assertTrue(32.0 <= z <= 48.0)
+                    self.assertIn(y, (-1.0, z))
+
+
 if __name__ == "__main__":
     unittest.main()
