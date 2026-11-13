@@ -1922,10 +1922,11 @@ static bool EdgeCornersOn(void)
     return sOn != 0;
 }
 
-/* The ground a cell of the scene's grid stands on (its rules' level), false where the grid holds no such cell: what
- * every chunk reads the same, its halo's cells' neighbours too (a chunk's own input ends at its halo). */
+/* The ground a cell of the scene's grid stands on (its rules' level) and the cell's archetype, false where the grid
+ * holds no such cell: what every chunk reads the same, its halo's cells' neighbours too (a chunk's own input ends at
+ * its halo). */
 static bool GridGroundAt(const struct DioramaSceneSnapshot *snapshot, const struct DioramaResolvedCell *resolvedCells,
-                         int mapX, int mapY, float *ground)
+                         int mapX, int mapY, float *ground, uint8_t *archetype)
 {
     int gridX = mapX - snapshot->gridOriginX;
     int gridY = mapY - snapshot->gridOriginY;
@@ -1941,6 +1942,7 @@ static bool GridGroundAt(const struct DioramaSceneSnapshot *snapshot, const stru
     if (source->mapX != mapX || source->mapY != mapY || source->metatileId >= DIORAMA_TILE_COUNT)
         return false;
     *ground = resolvedCells[gridIndex].groundHeight;
+    *archetype = resolvedCells[gridIndex].archetype;
     return true;
 }
 
@@ -1976,10 +1978,15 @@ static void ShapeEdgeCorners(const struct DioramaSceneSnapshot *snapshot,
             for (int side = 0; side < 4; side++)
             {
                 float ground;
+                uint8_t archetype;
 
+                /* lower ground: no hull (a voxel tree's, F8: its model stands on a bank over its ground; sloped down
+                 * to it, the corner left the sky showing between them - Safari Zone Northwest's (36, 7) from the
+                 * steep camera in run 454) */
                 lower[side] = GridGroundAt(snapshot, resolvedCells, mapX + step[side][0], mapY + step[side][1],
-                                           &ground)
-                           && ground <= cell->groundHeight - 0.5f;
+                                           &ground, &archetype)
+                           && ground <= cell->groundHeight - 0.5f
+                           && archetype != DIORAMA_ARCHETYPE_ROUND_HULL && archetype != DIORAMA_ARCHETYPE_GROUPED_HULL;
                 if (lower[side] && ground < foot)
                     foot = ground;
             }
