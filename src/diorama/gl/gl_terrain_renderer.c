@@ -1899,6 +1899,103 @@ static void ShapeRockMasses(struct DioramaTerrainChunkInput *input)
 }
 
 /*
+ * The owner (2026-11-13, a picture of Route 119's rock plateau): "why are corners blocks. Stop adding these blocks as
+ * edges." A raised top's corner the GBA draws on a cell no one walks on - a diagonal edge's corner piece (General 116),
+ * a rounded corner - stood as the top's ground a cell square: its drawing (the top and the edge's dark rim) on its top
+ * and a wall down to the low ground on two sides, a block, and down a diagonal edge a staircase of them. Such a cell
+ * (blocked, plain flat ground: not a tree, a building, stairs, a ledge, water or rock already a mass) with ground lower
+ * beside it on two sides that meet stands as rock does (ShapeRockMasses): from the lowest of that ground up to its own
+ * top, its faces sloping down to the low ground (on the south across the cell, elsewhere a few pixels), level with the
+ * ground as high as it on its other sides, joined to a mass on the same ground beside it; its drawing lies on the
+ * slope. A straight edge keeps its wall (the owner's "Rock faces", 2026-11-01). PKMN_DIORAMA_EDGE_CORNERS=0: as before.
+ */
+static bool EdgeCornersOn(void)
+{
+    static int sOn = -1;
+
+    if (sOn < 0)
+    {
+        const char *value = SDL_getenv("PKMN_DIORAMA_EDGE_CORNERS");
+
+        sOn = !(value != NULL && value[0] == '0');
+    }
+    return sOn != 0;
+}
+
+/* The ground a cell of the scene's grid stands on (its rules' level), false where the grid holds no such cell: what
+ * every chunk reads the same, its halo's cells' neighbours too (a chunk's own input ends at its halo). */
+static bool GridGroundAt(const struct DioramaSceneSnapshot *snapshot, const struct DioramaResolvedCell *resolvedCells,
+                         int mapX, int mapY, float *ground)
+{
+    int gridX = mapX - snapshot->gridOriginX;
+    int gridY = mapY - snapshot->gridOriginY;
+    int gridIndex;
+    const struct DioramaCellSnapshot *source;
+
+    if (gridX < 0 || gridY < 0 || gridX >= DIORAMA_GRID_WIDTH || gridY >= DIORAMA_GRID_HEIGHT)
+        return false;
+    gridIndex = gridY * DIORAMA_GRID_WIDTH + gridX;
+    if (gridIndex >= snapshot->visibleCellCount)
+        return false;
+    source = &snapshot->cells[gridIndex];
+    if (source->mapX != mapX || source->mapY != mapY || source->metatileId >= DIORAMA_TILE_COUNT)
+        return false;
+    *ground = resolvedCells[gridIndex].groundHeight;
+    return true;
+}
+
+static void ShapeEdgeCorners(const struct DioramaSceneSnapshot *snapshot,
+                             const struct DioramaResolvedCell *resolvedCells,
+                             struct DioramaTerrainChunkInput *input)
+{
+    /* north, east, south, west: two that meet are neighbours in this order (west and north too) */
+    static const int8_t step[4][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}};
+
+    if (!EdgeCornersOn())
+        return;
+    /* Every cell of the input, its halo's too, decided from the scene's grid: a chunk and the one beside it decide
+     * a cell on their seam alike (a halo cell left as it was where its own chunk shaped it opened the side between
+     * them to the sky: Route 110's, Route 119's and the Battle Frontier's in the 34 places' tour) */
+    for (int y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
+        for (int x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
+        {
+            struct DioramaTerrainCell *cell = &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
+            int mapX = cell->mapX - sShiftX;
+            int mapY = cell->mapY - sShiftY;
+            bool lower[4];
+            bool corner = false;
+            float foot = cell->groundHeight;
+
+            if (!cell->present || cell->collision == 0 || cell->shape != DIORAMA_SHAPE_FLAT
+             || cell->archetype != DIORAMA_ARCHETYPE_GROUND || cell->rockMass || cell->caveTunnel
+             || (cell->measuredFlags & DIORAMA_MEASURED_MOUNTAIN_ART) || cell->reflective
+             || cell->surfaceCount > 1 || cell->visualHeight != cell->groundHeight
+             || (cell->terrainClass != DIORAMA_TERRAIN_CLASS_GROUND && cell->terrainClass != DIORAMA_TERRAIN_CLASS_PATH
+              && cell->terrainClass != DIORAMA_TERRAIN_CLASS_SAND && cell->terrainClass != DIORAMA_TERRAIN_CLASS_ASH))
+                continue;
+            for (int side = 0; side < 4; side++)
+            {
+                float ground;
+
+                lower[side] = GridGroundAt(snapshot, resolvedCells, mapX + step[side][0], mapY + step[side][1],
+                                           &ground)
+                           && ground <= cell->groundHeight - 0.5f;
+                if (lower[side] && ground < foot)
+                    foot = ground;
+            }
+            for (int side = 0; side < 4; side++)
+                corner |= lower[side] && lower[(side + 1) % 4];
+            if (!corner)
+                continue;
+            /* rock on the low ground beside it, up to its own top (visualHeight) */
+            cell->groundHeight = foot;
+            cell->rockMass = true;
+            cell->measuredFlags |= DIORAMA_MEASURED_MOUNTAIN_ART;
+            memset(cell->mountainHeight, 0, sizeof(cell->mountainHeight));
+        }
+}
+
+/*
  * A cave's mouth in a mountain's face (step 16, phase C4). The GBA draws its dark arch over two cells: the mouth's
  * own (a door the player walks into, MB_NON_ANIMATED_DOOR) and the bottom of the rock's over it. The mouth's cell is
  * the ground the player stands on, a gap in the face; the rock north of it was a slope down to that ground with the
@@ -2378,6 +2475,7 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
         }
     }
     FindCaveTunnels(snapshot, input);
+    ShapeEdgeCorners(snapshot, resolvedCells, input);
     ShapeRockMasses(input);
     for (y = 0; y < DIORAMA_TERRAIN_INPUT_SIZE; y++)
         for (x = 0; x < DIORAMA_TERRAIN_INPUT_SIZE; x++)
