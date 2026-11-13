@@ -185,11 +185,12 @@ static bool PictureState(struct NativeScriptPic *pic)
     return ScriptMenu_NativeUiPokemonPic(pic) || ContestUtil_NativeUiEntryPic(pic);
 }
 
-/* the script's menu up now; else the shared YES / NO a game's own question uses (DoYesNoFuncWithChoice: a roulette
- * table's "Do you want to play?", an item's "Use it?"), which takes A, B and the cursor as a script's does */
+/* the script's menu up now, or the Apprentice's question (its own list, a script's to the player: MS-246); else the
+ * shared YES / NO a game's own question uses (DoYesNoFuncWithChoice: a roulette table's "Do you want to play?", an
+ * item's "Use it?"), which takes A, B and the cursor as a script's does */
 static void MenuState(struct NativeScriptMenu *m)
 {
-    if (ScriptMenu_NativeUiState(m) || !MenuHelpers_NativeUiYesNo())
+    if (ScriptMenu_NativeUiState(m) || Apprentice_NativeUiState(m) || !MenuHelpers_NativeUiYesNo())
         return;
     m->kind = NATIVE_SCRIPT_MENU_YES_NO;
     m->ready = !gPaletteFade.active;

@@ -539,6 +539,12 @@ static void SaveApprenticeParty(u8 numQuestions)
     }
 }
 
+#ifdef ENABLE_NATIVE_UI
+// The rows of the Apprentice's question up now, as CreateApprenticeMenu prints them (Apprentice_NativeUiState).
+static const u8 *sNativeUiAnswers[MULTI_PARTY_SIZE];
+static u8 sNativeUiAnswerCount;
+#endif
+#line 542 // gba-line
 static void CreateApprenticeMenu(u8 menu)
 {
     u8 i;
@@ -607,6 +613,12 @@ static void CreateApprenticeMenu(u8 menu)
         break;
     }
 
+#ifdef ENABLE_NATIVE_UI
+    for (i = 0; i < count; i++)
+        sNativeUiAnswers[i] = strings[i];
+    sNativeUiAnswerCount = count;
+#endif
+#line 610 // gba-line
     pixelWidth = 0;
     for (i = 0; i < count; i++)
     {
@@ -1287,3 +1299,30 @@ static void UNUSED ExecuteFollowupFuncAfterButtonPress(TaskFunc task)
     u8 taskId = CreateTask(Task_SwitchToFollowupFuncAfterButtonPress, 1);
     SetTaskFuncWithFollowupFunc(taskId, Task_SwitchToFollowupFuncAfterButtonPress, task);
 }
+
+#ifdef ENABLE_NATIVE_UI
+#include "palette.h"
+#include "native_ui/ui_engine.h"
+
+// The native PC UI (src/native_ui/screens/ui_field_text.c) draws the Apprentice's questions in the Battle Tower lobby
+// as a script's multichoice (KNOWN_ISSUES MS-246: the GBA's own windows before): its rows as CreateApprenticeMenu
+// printed them, the cursor, B not taken (an answer is required: Task_ChooseAnswer's data 4). Every button stays here.
+bool32 Apprentice_NativeUiState(struct NativeScriptMenu *out)
+{
+    u8 taskId = FindTaskIdByFunc(Task_ChooseAnswer);
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (taskId == TASK_NONE)
+        return FALSE;
+    out->kind = NATIVE_SCRIPT_MENU_MULTICHOICE;
+    out->multichoiceId = MULTI_NONE;
+    out->ready = !gPaletteFade.active;
+    out->cursor = Menu_GetCursorPos();
+    out->ignoreB = gTasks[taskId].data[4] != 0;
+    for (i = 0; i < sNativeUiAnswerCount && i < ARRAY_COUNT(sNativeUiAnswers) && i < NATIVE_SCRIPT_MENU_MAX; i++)
+        out->labels[i] = sNativeUiAnswers[i];
+    out->count = i;
+    return TRUE;
+}
+#endif // ENABLE_NATIVE_UI

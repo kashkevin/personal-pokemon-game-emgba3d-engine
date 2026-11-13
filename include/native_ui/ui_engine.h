@@ -1055,6 +1055,9 @@ struct NativeScriptMenu
 bool32 ScriptMenu_NativeUiState(struct NativeScriptMenu *out);
 /* the rows of any multichoice list as the engine prints them; returns how many */
 u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max);
+/* the Apprentice's question in the Battle Tower lobby (apprentice.c: its own list and YES / NO, B not taken) as a
+ * script's multichoice: multichoiceId MULTI_NONE */
+bool32 Apprentice_NativeUiState(struct NativeScriptMenu *out);
 /* the picture box a script shows (showmonpic) until hidemonpic closes it: the Pokémon (its personality and whether
  * shiny, as the picture shows it), its window (the frame's inside, 8 x 8 tiles from left, top) and the first tile of
  * the picture's sprite (0xFFFF: none) */
