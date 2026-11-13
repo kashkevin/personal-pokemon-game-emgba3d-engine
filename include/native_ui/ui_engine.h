@@ -1058,6 +1058,9 @@ u32 ScriptMenu_NativeUiList(u32 multichoiceId, const u8 **labels, u32 max);
 /* the Apprentice's question in the Battle Tower lobby (apprentice.c: its own list and YES / NO, B not taken) as a
  * script's multichoice: multichoiceId MULTI_NONE */
 bool32 Apprentice_NativeUiState(struct NativeScriptMenu *out);
+/* the new game's introduction (main_menu.c: Professor Birch's speech under CB2_MainMenu): TRUE while it runs; its
+ * BOY / GIRL menu (B not taken) or the name's YES / NO as a script's menu; its message is window 0's */
+bool32 MainMenu_NativeUiIntroState(struct NativeScriptMenu *out);
 /* the picture box a script shows (showmonpic) until hidemonpic closes it: the Pokémon (its personality and whether
  * shiny, as the picture shows it), its window (the frame's inside, 8 x 8 tiles from left, top) and the first tile of
  * the picture's sprite (0xFFFF: none) */

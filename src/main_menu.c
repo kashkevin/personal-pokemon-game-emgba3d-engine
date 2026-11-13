@@ -2361,6 +2361,7 @@ static void Task_NewGameBirchSpeech_ReturnFromNamingScreenShowTextbox(u8 taskId)
 #ifdef ENABLE_NATIVE_UI
 #include "load_save.h"
 #include "region_map.h"
+#include "constants/script_menu.h"
 #include "native_ui/ui_engine.h"
 
 // The native PC UI (src/native_ui/screens/ui_main_menu.c) draws the main menu
@@ -2477,5 +2478,59 @@ void MainMenu_NativeUiSaveSummary(struct NativeSaveSummary *out)
         out->isEgg[i] = GetMonData(mon, MON_DATA_IS_EGG);
         out->fainted[i] = !out->isEgg[i] && GetMonData(mon, MON_DATA_HP) == 0;
     }
+}
+// The new game's introduction (KNOWN_ISSUES MS-250): Professor Birch's speech as the native PC UI draws it
+// (src/native_ui/screens/ui_intro.c) - TRUE while a task of the speech runs; its BOY / GIRL menu (B not taken: the
+// task repeats until a row is chosen) or the name's YES / NO (B is NO) as a script's menu, with the cursor. Its
+// message is window 0's. Every button stays the game's.
+bool32 MainMenu_NativeUiIntroState(struct NativeScriptMenu *out)
+{
+    static const TaskFunc sSpeechTasks[] = {
+        Task_NewGameBirchSpeech_Init, Task_NewGameBirchSpeech_WaitToShowBirch,
+        Task_NewGameBirchSpeech_WaitForSpriteFadeInWelcome, Task_NewGameBirchSpeech_ThisIsAPokemon,
+        Task_NewGameBirchSpeech_MainSpeech, Task_NewGameBirchSpeech_AndYouAre,
+        Task_NewGameBirchSpeech_StartBirchLotadPlatformFade, Task_NewGameBirchSpeech_SlidePlatformAway,
+        Task_NewGameBirchSpeech_StartPlayerFadeIn, Task_NewGameBirchSpeech_WaitForPlayerFadeIn,
+        Task_NewGameBirchSpeech_BoyOrGirl, Task_NewGameBirchSpeech_WaitToShowGenderMenu,
+        Task_NewGameBirchSpeech_ChooseGender, Task_NewGameBirchSpeech_WhatsYourName,
+        Task_NewGameBirchSpeech_SlideOutOldGenderSprite, Task_NewGameBirchSpeech_SlideInNewGenderSprite,
+        Task_NewGameBirchSpeech_WaitForWhatsYourNameToPrint, Task_NewGameBirchSpeech_WaitPressBeforeNameChoice,
+        Task_NewGameBirchSpeech_StartNamingScreen, Task_NewGameBirchSpeech_SoItsPlayerName,
+        Task_NewGameBirchSpeech_CreateNameYesNo, Task_NewGameBirchSpeech_ProcessNameYesNoMenu,
+        Task_NewGameBirchSpeech_SlidePlatformAway2, Task_NewGameBirchSpeech_ReshowBirchLotad,
+        Task_NewGameBirchSpeech_WaitForSpriteFadeInAndTextPrinter, Task_NewGameBirchSpeech_AreYouReady,
+        Task_NewGameBirchSpeech_ShrinkPlayer, Task_NewGameBirchSpeech_WaitForPlayerShrink,
+        Task_NewGameBirchSpeech_FadePlayerToWhite, Task_NewGameBirchSpeech_Cleanup,
+        Task_NewGameBirchSpeech_ReturnFromNamingScreenShowTextbox,
+    };
+    bool32 speech = FALSE;
+    u32 i;
+
+    memset(out, 0, sizeof(*out));
+    if (gMain.callback2 != CB2_MainMenu)
+        return FALSE;
+    for (i = 0; i < ARRAY_COUNT(sSpeechTasks) && !speech; i++)
+        speech = FindTaskIdByFunc(sSpeechTasks[i]) != TASK_NONE;
+    if (!speech)
+        return FALSE;
+    if (FindTaskIdByFunc(Task_NewGameBirchSpeech_ChooseGender) != TASK_NONE)
+    {
+        out->kind = NATIVE_SCRIPT_MENU_MULTICHOICE;
+        out->multichoiceId = MULTI_NONE;
+        out->ready = !gPaletteFade.active;
+        out->cursor = Menu_GetCursorPos();
+        out->ignoreB = TRUE;
+        for (i = 0; i < ARRAY_COUNT(sMenuActions_Gender) && i < NATIVE_SCRIPT_MENU_MAX; i++)
+            out->labels[i] = sMenuActions_Gender[i].text;
+        out->count = i;
+    }
+    else if (FindTaskIdByFunc(Task_NewGameBirchSpeech_ProcessNameYesNoMenu) != TASK_NONE)
+    {
+        out->kind = NATIVE_SCRIPT_MENU_YES_NO;
+        out->ready = !gPaletteFade.active;
+        out->cursor = Menu_GetCursorPos();
+        out->count = 2;
+    }
+    return TRUE;
 }
 #endif // ENABLE_NATIVE_UI

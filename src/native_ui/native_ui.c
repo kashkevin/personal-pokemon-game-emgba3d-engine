@@ -48,6 +48,7 @@ extern uint8_t gPlatformPictureNoBrightness;
 static const struct UiScreen *const sScreens[] = {
     &gUiScreen_Title,
     &gUiScreen_MainMenu,
+    &gUiScreen_Intro,       /* the new game's introduction: Birch's speech, its menus (MS-250) */
     &gUiScreen_Options,
     &gUiScreen_Pause,
     &gUiScreen_Party,
