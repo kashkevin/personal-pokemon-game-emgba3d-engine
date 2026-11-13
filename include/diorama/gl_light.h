@@ -42,6 +42,9 @@ struct DioramaLightUniforms
     GLint dappleAnchor;
     GLint edgeFog;
     GLint edgeFogColor;
+    GLint clearInner;
+    GLint clearOuter;
+    GLint clearFloor;
 };
 
 /* Once a frame, before drawing: the light of the snapshot's weather and map
@@ -59,6 +62,16 @@ void DioramaGLLight_ApplyNeutral(const struct DioramaLightUniforms *uniforms);
  * field frame and turned off after it (a 3D battle's frame has none). */
 void DioramaGLLight_SetEdgeFog(bool on, float centreX, float centreZ, float start, float end,
                                const float colour[3]);
+/* A 3D battle's arena in a cramped room (battle_arena.h, KNOWN_ISSUES V10): everything inside `inner` and what
+ * stands higher than `level` inside `outer` (each x0, z0, x1, z1 in the scene's x east, z north) is cleared away
+ * from the terrain, the trees, the detail objects and the buildings (their shaders' Cleared). Set for the battle's
+ * world and turned off after it, as the edge fog; Apply writes it into a program, ApplyNeutral writes none. */
+void DioramaGLLight_SetClearing(bool on, const float inner[4], const float outer[4], float level);
+/* The clearing now set (none: false), for a shader of its own (the battle's curtain). */
+bool DioramaGLLight_GetClearing(float inner[4], float outer[4], float *level);
+/* Writes the clearing into a program's uniforms, or none (`on` false): a draw that must stand in it - the arena
+ * itself - turns it off for itself and back on after. */
+void DioramaGLLight_ApplyClearing(const struct DioramaLightUniforms *uniforms, bool on);
 /* This frame's light in the air, for gl_air.h. */
 struct DioramaAirLight
 {
@@ -80,10 +93,23 @@ float DioramaGLLight_Noise(float u, float v, int period, uint32_t seed);
 /* Frees the dapple pattern (made again on the next Update). */
 void DioramaGLLight_Shutdown(void);
 
+/* GLSL for a fragment shader: Cleared(world position), whether a point is cleared away for a battle's arena
+ * (DioramaGLLight_SetClearing; a box with x0 above x1 holds nothing). */
+#define DIORAMA_GLSL_CLEARING \
+    "uniform vec4 clearInner;\n" \
+    "uniform vec4 clearOuter;\n" \
+    "uniform float clearFloor;\n" \
+    "bool Cleared(vec3 p) {\n" \
+    "  return (p.x > clearInner.x && p.x < clearInner.z && p.z > clearInner.y && p.z < clearInner.w)\n" \
+    "      || (p.y > clearFloor && p.x > clearOuter.x && p.x < clearOuter.z\n" \
+    "          && p.z > clearOuter.y && p.z < clearOuter.w);\n" \
+    "}\n"
+
 /* GLSL for a fragment shader: the uniforms, Light(brightness), the tinted
  * brightness to multiply a texel by, Dapple(world position), the dapples'
- * factor there, and Haze(colour, view depth). */
+ * factor there, Haze(colour, view depth) and Cleared(world position). */
 #define DIORAMA_GLSL_LIGHT \
+    DIORAMA_GLSL_CLEARING \
     "uniform vec3 sunTint;\n" \
     "uniform vec3 shadeTint;\n" \
     "uniform vec3 haze;\n" /* start, per unit of depth, most */ \

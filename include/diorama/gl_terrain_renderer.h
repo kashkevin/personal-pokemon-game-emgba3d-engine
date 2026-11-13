@@ -42,6 +42,13 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
                            GLuint foregroundAtlasTexture, float cameraX, float cameraZ,
                            float cameraPitch, float focalLength,
                            float aspectCorrection, bool debug);
+/* A 3D battle's arena in a cramped room (diorama/battle_arena.h, KNOWN_ISSUES V10): its floor and walls, drawn with
+ * the terrain by the terrain's own shader (the room's light and air) after the chunks, in the scene's coordinates,
+ * and never cleared away (gl_light.h DioramaGLLight_SetClearing). SetArena keeps a copy of the vertices (none: a
+ * count of 0); ShowArena draws them or not (the battle's world shows them, the field never). */
+struct DioramaTerrainVertex; /* terrain_mesh.h */
+void DioramaGLTerrain_SetArena(const struct DioramaTerrainVertex *vertices, uint32_t count);
+void DioramaGLTerrain_ShowArena(bool shown);
 /* The sun's depth pass (diorama/gl_shadow.h): every resident chunk and tree. */
 void DioramaGLTerrain_DrawShadow(GLuint atlasTexture, GLuint baseAtlasTexture,
                                  GLuint foregroundAtlasTexture);

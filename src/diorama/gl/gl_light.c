@@ -411,6 +411,56 @@ void DioramaGLLight_SetEdgeFog(bool on, float centreX, float centreZ, float star
         sEdgeFog.colour[i] = colour != NULL ? colour[i] : 0.0f;
 }
 
+/* A 3D battle's arena (DioramaGLLight_SetClearing): its two boxes, x0, z0, x1, z1, and the outer one's level. */
+static struct
+{
+    bool on;
+    float inner[4];
+    float outer[4];
+    float level;
+} sClearing;
+
+void DioramaGLLight_SetClearing(bool on, const float inner[4], const float outer[4], float level)
+{
+    sClearing.on = on && inner != NULL && outer != NULL;
+    for (int i = 0; i < 4; i++)
+    {
+        sClearing.inner[i] = sClearing.on ? inner[i] : 0.0f;
+        sClearing.outer[i] = sClearing.on ? outer[i] : 0.0f;
+    }
+    sClearing.level = level;
+}
+
+bool DioramaGLLight_GetClearing(float inner[4], float outer[4], float *level)
+{
+    for (int i = 0; i < 4; i++)
+    {
+        inner[i] = sClearing.inner[i];
+        outer[i] = sClearing.outer[i];
+    }
+    *level = sClearing.level;
+    return sClearing.on;
+}
+
+void DioramaGLLight_ApplyClearing(const struct DioramaLightUniforms *uniforms, bool on)
+{
+    if (on && sClearing.on)
+    {
+        dglUniform4f(uniforms->clearInner, sClearing.inner[0], sClearing.inner[1], sClearing.inner[2],
+                     sClearing.inner[3]);
+        dglUniform4f(uniforms->clearOuter, sClearing.outer[0], sClearing.outer[1], sClearing.outer[2],
+                     sClearing.outer[3]);
+        dglUniform1f(uniforms->clearFloor, sClearing.level);
+    }
+    else
+    {
+        /* Nothing: boxes inside out, a floor out of reach. */
+        dglUniform4f(uniforms->clearInner, 1.0e6f, 1.0e6f, -1.0e6f, -1.0e6f);
+        dglUniform4f(uniforms->clearOuter, 1.0e6f, 1.0e6f, -1.0e6f, -1.0e6f);
+        dglUniform1f(uniforms->clearFloor, 1.0e6f);
+    }
+}
+
 static void ApplyEdgeFog(const struct DioramaLightUniforms *uniforms, bool on)
 {
     if (on && sEdgeFog.on)
@@ -439,6 +489,10 @@ bool DioramaGLLight_Locate(GLuint program, struct DioramaLightUniforms *uniforms
      * has none (-1, and setting it does nothing). */
     uniforms->edgeFog = dglGetUniformLocation(program, "edgeFog");
     uniforms->edgeFogColor = dglGetUniformLocation(program, "edgeFogColor");
+    /* Optional too: a program whose shaders never ask Cleared has none. */
+    uniforms->clearInner = dglGetUniformLocation(program, "clearInner");
+    uniforms->clearOuter = dglGetUniformLocation(program, "clearOuter");
+    uniforms->clearFloor = dglGetUniformLocation(program, "clearFloor");
     return uniforms->sunTint >= 0 && uniforms->shadeTint >= 0
         && uniforms->haze >= 0 && uniforms->hazeColor >= 0
         && uniforms->dappleMap >= 0 && uniforms->dapple >= 0 && uniforms->dappleAnchor >= 0;
@@ -460,6 +514,7 @@ void DioramaGLLight_Apply(const struct DioramaLightUniforms *uniforms, float cam
     dglUniform4f(uniforms->dapple, sLight.dappleLow, sLight.dappleHigh, drift, dapples ? 1.0f : 0.0f);
     dglUniform2f(uniforms->dappleAnchor, sAnchorX, sAnchorZ);
     ApplyEdgeFog(uniforms, true);
+    DioramaGLLight_ApplyClearing(uniforms, true);
     dglActiveTexture(GL_TEXTURE0 + DIORAMA_LIGHT_TEXTURE_UNIT);
     glBindTexture(GL_TEXTURE_2D, dapples ? sDappleTexture : 0);
     dglActiveTexture(GL_TEXTURE0);
@@ -475,6 +530,7 @@ void DioramaGLLight_ApplyNeutral(const struct DioramaLightUniforms *uniforms)
     dglUniform4f(uniforms->dapple, 1.0f, 1.0f, 0.0f, 0.0f);
     dglUniform2f(uniforms->dappleAnchor, 0.0f, 0.0f);
     ApplyEdgeFog(uniforms, false);
+    DioramaGLLight_ApplyClearing(uniforms, false);
 }
 
 void DioramaGLLight_GetAir(struct DioramaAirLight *air)

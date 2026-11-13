@@ -26,6 +26,7 @@
 #include <string.h>
 #include <SDL2/SDL.h>
 
+#include "diorama/battle_arena.h"
 #include "diorama/battle_tile_pace.h"
 #include "diorama/battle_environment.h"
 #include "diorama/battle_scene.h"
@@ -44,6 +45,7 @@
 #include "diorama/gl_target.h"
 #include "diorama/gl_terrain_renderer.h"
 #include "diorama/gl_tree_sprites.h"
+#include "diorama/metatile_atlas.h"
 #include "diorama/rules.h"
 #include "diorama/scene_snapshot.h"
 #include "diorama/terrain_mesh.h"
@@ -168,6 +170,11 @@ static struct
     uint32_t framesBetween; /* frames drawn from a view between game frames, for the log */
     struct IntroEffects intro;
     struct DioramaStageResult stageResult;
+    /* The room's own arena where no stage is clear (KNOWN_ISSUES V10): its plan and its vertices' count. */
+    struct DioramaArena arena;
+    uint32_t arenaVertices;
+    struct DioramaStageView arenaSeen; /* the stage as WantsArena measured it, for the log */
+    float arenaLowBlack;               /* ... and the black from the battle's row down (when it got that far) */
     uint8_t mapGroup, mapNum;
     uint16_t mapLayoutId;
     bool log;
@@ -200,6 +207,7 @@ static GLuint sCurtainProgram, sCurtainVertexArray, sCurtainBuffer;
 static GLint sCurtainCamera, sCurtainPitch, sCurtainFocal, sCurtainAspect;
 static GLint sCurtainEyeHeight, sCurtainEyeDistance, sCurtainScreenOffset;
 static GLint sCurtainOrigin, sCurtainScale, sCurtainOutSize;
+static GLint sCurtainClearInner, sCurtainClearOuter, sCurtainClearFloor;
 static float sCurtainVertices[CURTAIN_MAX_QUADS * 6 * 3];
 static unsigned sCurtainVertexCount;
 
@@ -593,6 +601,7 @@ static void AnimateTiles(void)
 static const char sCurtainVertexShader[] =
     "#version 330 core\n"
     "layout(location = 0) in vec3 position;\n"
+    "out vec3 worldPosition;\n"
     "uniform vec2 cameraPosition;\n"
     "uniform float cameraPitch;\n"
     "uniform float focalLength;\n"
@@ -614,16 +623,20 @@ static const char sCurtainVertexShader[] =
     "  float clipZ = ((farDepth + nearDepth) / (farDepth - nearDepth)) * depth"
     "              - (2.0 * farDepth * nearDepth) / (farDepth - nearDepth);\n"
     "  gl_Position = vec4(clipX, clipY, clipZ, depth);\n"
+    "  worldPosition = position;\n"
     "}\n";
 
 static const char sCurtainFragmentShader[] =
     "#version 330 core\n"
+    "in vec3 worldPosition;\n"
     "out vec4 outColor;\n"
     "uniform sampler2D image;\n"
     "uniform vec2 origin;\n"
     "uniform float scale;\n"
     "uniform vec2 outSize;\n"
+    DIORAMA_GLSL_CLEARING /* a 3D battle's arena stands where it was (gl_light.h) */
     "void main() {\n"
+    "  if (Cleared(worldPosition)) discard;\n"
     "  vec2 p = vec2(gl_FragCoord.x, outSize.y - gl_FragCoord.y);\n"
     "  outColor = vec4(texture(image, (p - origin) / scale / vec2(240.0, 160.0)).rgb, 1.0);\n"
     "}\n";
@@ -661,6 +674,9 @@ static bool InitCurtain(void)
     sCurtainOrigin = dglGetUniformLocation(sCurtainProgram, "origin");
     sCurtainScale = dglGetUniformLocation(sCurtainProgram, "scale");
     sCurtainOutSize = dglGetUniformLocation(sCurtainProgram, "outSize");
+    sCurtainClearInner = dglGetUniformLocation(sCurtainProgram, "clearInner");
+    sCurtainClearOuter = dglGetUniformLocation(sCurtainProgram, "clearOuter");
+    sCurtainClearFloor = dglGetUniformLocation(sCurtainProgram, "clearFloor");
     dglGenVertexArrays(1, &sCurtainVertexArray);
     dglBindVertexArray(sCurtainVertexArray);
     dglGenBuffers(1, &sCurtainBuffer);
@@ -754,6 +770,18 @@ static void DrawCurtain(const struct Layout *layout, float focal, float aspect)
     dglUniform2f(sCurtainOrigin, layout->gameX, layout->gameY);
     dglUniform1f(sCurtainScale, layout->scale);
     dglUniform2f(sCurtainOutSize, (float)layout->outW, (float)layout->outH);
+    {
+        float inner[4], outer[4], level;
+
+        if (!DioramaGLLight_GetClearing(inner, outer, &level))
+        {
+            inner[0] = outer[0] = inner[1] = outer[1] = level = 1.0e6f;
+            inner[2] = outer[2] = inner[3] = outer[3] = -1.0e6f;
+        }
+        dglUniform4f(sCurtainClearInner, inner[0], inner[1], inner[2], inner[3]);
+        dglUniform4f(sCurtainClearOuter, outer[0], outer[1], outer[2], outer[3]);
+        dglUniform1f(sCurtainClearFloor, level);
+    }
     dglActiveTexture(GL_TEXTURE0);
     glBindTexture(GL_TEXTURE_2D, sArtTexture);
     dglBindVertexArray(sCurtainVertexArray);
@@ -1430,6 +1458,330 @@ static void StageRequest(struct DioramaStageRequest *request, const struct Layou
     request->context = context;
 }
 
+/* ── The fallback scene of a cramped room (KNOWN_ISSUES V10) ───────────── */
+
+/*
+ * In a room or a cave the stage search may find no clear camera position: every stage near the player has a wall
+ * pressed close behind a battler, something standing over a battler's picture, or the black past the room in
+ * view (the maze-like rooms: Fortree's and Dewford's Gyms, Mt. Pyre's graves). There the battle stands in an
+ * arena of the room's own (the owner's decision #57; battle_arena.h): the room's floor under it, its north wall
+ * behind it and round its sides, cleared of what stood there, in the room's light. Where the search finds a clear
+ * stage the battle stands in the room as it is. PKMN_DIORAMA_ARENA=0 never builds one, =2 always (rooms and caves).
+ */
+#define ARENA_COVERED 0.12f  /* the most of a battler's picture covered ... */
+#define ARENA_PRESSED 0.5f   /* ... a wall closer behind a battler's feet than 1.25 tiles ... */
+#define ARENA_BLACK 0.25f    /* ... the black past the room over a quarter of the picture ... */
+#define ARENA_BLACK_LOW 0.085f /* ... or over a twelfth of it from the battle's own row down (black ground beside
+                                * and in front of the battlers, where no curtain stands): not clear */
+/* The picture they are measured in: the default window's (1920 x 1080, display_settings.h; the GBA's picture at the
+ * field's whole-number scale 6 on its bottom edge: 40 of its pixels more either side and 20 above, as 1280 x 720 at
+ * 4; BattleLayout, VisibleRect). */
+#define ARENA_PICTURE_LEFT (-40.0f)
+#define ARENA_PICTURE_RIGHT 280.0f
+#define ARENA_PICTURE_TOP (-20.0f)
+#define ARENA_BEHIND 3.0f    /* tiles from the furthest battler's feet to the back wall */
+#define ARENA_PAST_EYE 1.5f  /* tiles the floor reaches south past the eye */
+#define ARENA_CORNER 1.0f    /* how far inside the picture's edges at the back wall the side walls stand */
+#define ARENA_MIN_HALF 4.5f
+#define ARENA_MAX_HALF 12.0f
+#define ARENA_REACH 20       /* tiles round the stage the room is read for its floor and its wall */
+#define ARENA_MARGIN 3.0f    /* tiles past the walls cleared above the floor, so nothing tall looks over them */
+#define ARENA_MAX_VERTICES (6 * (DIORAMA_ARENA_MAX_ROWS * DIORAMA_ARENA_MAX_COLUMNS \
+                                 + DIORAMA_ARENA_WALL_ROWS * (DIORAMA_ARENA_MAX_COLUMNS + 2 * DIORAMA_ARENA_MAX_ROWS)))
+
+static struct DioramaTerrainVertex sArenaVertices[ARENA_MAX_VERTICES];
+#define ARENA_MAX_OBJECTS 192
+static struct DioramaArenaObject sArenaObjects[ARENA_MAX_OBJECTS];
+
+static int ArenaMode(void)
+{
+    const char *value = SDL_getenv("PKMN_DIORAMA_ARENA");
+
+    return value == NULL || value[0] == '\0' ? 1 : value[0] - '0';
+}
+
+/* The rooms built for their battles - a Frontier facility's battle room, a Battle Tent's - stand as they are: their
+ * battles stand where the facility puts them, in rooms laid out (and checked) for them (the Palace's pillars, MS-235;
+ * the Pike's curtain, MS-236; the Dome's audience, MS-226). */
+static bool BuiltForBattles(uint16_t layout)
+{
+    switch (layout)
+    {
+    case LAYOUT_BATTLE_FRONTIER_BATTLE_TOWER_BATTLE_ROOM:
+    case LAYOUT_BATTLE_FRONTIER_BATTLE_DOME_BATTLE_ROOM:
+    case LAYOUT_BATTLE_FRONTIER_BATTLE_PALACE_BATTLE_ROOM:
+    case LAYOUT_BATTLE_FRONTIER_BATTLE_FACTORY_BATTLE_ROOM:
+    case LAYOUT_BATTLE_FRONTIER_BATTLE_ARENA_BATTLE_ROOM:
+    case LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_NORMAL:
+    case LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_FINAL:
+    case LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_WILD_MONS:
+    case LAYOUT_BATTLE_TENT_BATTLE_ROOM:
+    case LAYOUT_VERDANTURF_TOWN_BATTLE_TENT_BATTLE_ROOM:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/* Whether a battle on this stage stands in the room's arena: in a room, a cave or a secret base (not under the sea,
+ * not on the Pyramid's top, not in a room built for its battles), when what the camera sees above the text box is
+ * not clear - in the picture the default window shows (ARENA_PICTURE_LEFT...), the same decision on every window,
+ * wide or narrow. */
+static bool WantsArena(const struct DioramaStageRequest *request, const struct DioramaStageResult *result,
+                       const struct DioramaSceneSnapshot *snapshot, int mode, struct DioramaStageView *measured,
+                       float *lowBlack)
+{
+    struct DioramaStageRequest picture;
+    struct DioramaStageView seen;
+
+    memset(measured, 0, sizeof(*measured));
+    *lowBlack = 0.0f;
+    if (mode == 0 || !request->indoor || snapshot->mapType == MAP_TYPE_UNDERWATER || request->backdropBeyond)
+        return false;
+    if (mode == 2)
+        return true;
+    if (BuiltForBattles(snapshot->mapLayoutId))
+        return false;
+    picture = *request;
+    picture.visibleLeft = ARENA_PICTURE_LEFT;
+    picture.visibleRight = ARENA_PICTURE_RIGHT;
+    picture.visibleTop = ARENA_PICTURE_TOP;
+    picture.visibleBottom = 112.0f;
+    DioramaStage_Measure(&picture, result->targetX, result->targetY, &seen);
+    *measured = seen;
+    if (seen.overlap > ARENA_COVERED || seen.cramped > ARENA_PRESSED || seen.voidFraction > ARENA_BLACK)
+        return true;
+    /* the black from the battle's own row down: the ground past the room beside and in front of the battlers */
+    picture.visibleTop = picture.view.targetRow;
+    DioramaStage_Measure(&picture, result->targetX, result->targetY, &seen);
+    *lowBlack = seen.voidFraction;
+    return seen.voidFraction > ARENA_BLACK_LOW;
+}
+
+static bool ArenaCellAt(void *context, int x, int y, struct DioramaArenaCell *cell)
+{
+    const struct DioramaCellSnapshot *source;
+    struct DioramaStageCell stage;
+
+    if (StageResolvedAt(context, x, y, &source) == NULL || !StageCellAt(context, x, y, &stage))
+        return false;
+    cell->slot = DioramaAtlas_CellSlot(source);
+    cell->kind = stage.kind;
+    cell->blocked = stage.blocked;
+    cell->open = !stage.slope && !stage.noFeet && stage.top <= 0.05f;
+    cell->lift = stage.lift;
+    return true;
+}
+
+/* The room's own objects - its models standing on its floor, of the layout the stage stands in - for the arena's
+ * scenery (battle_arena.h DioramaArenaObject: each one's placement, its model and size, its height). */
+static unsigned ArenaObjects(struct StageContext *context, int x, int y)
+{
+    const struct DioramaCellSnapshot *source;
+    unsigned first, count, n = 0;
+    uint16_t layout;
+
+    if (StageResolvedAt(context, x, y, &source) == NULL)
+        return 0;
+    layout = source->sourceLayoutId;
+    count = DioramaBuildings_LayoutPlacements(layout, &first);
+    for (unsigned p = 0; p < count && n < ARENA_MAX_OBJECTS; ++p)
+    {
+        struct DioramaBuildingPlacementInfo info;
+        float top = 0.0f;
+
+        if (!DioramaBuildings_GetPlacement(first + p, &info) || !DioramaBuildings_PlacementStands(first + p))
+            continue;
+        for (int cy = 0; cy < info.height; ++cy)
+            for (int cx = 0; cx < info.width; ++cx)
+            {
+                uint16_t ground;
+                uint8_t quarters;
+                float cellTop;
+
+                if (DioramaBuildings_CellAt(layout, info.x + cx, info.y + cy, &ground, &quarters, &cellTop)
+                 && cellTop > top)
+                    top = cellTop;
+            }
+        sArenaObjects[n].id = first + p;
+        sArenaObjects[n].model = info.firstVertex;
+        sArenaObjects[n].width = info.width;
+        sArenaObjects[n].height = info.height;
+        sArenaObjects[n].top = top;
+        ++n;
+    }
+    return n;
+}
+
+/* The arena's half width: its side walls ARENA_CORNER inside the picture's edges at the back wall, so they show in
+ * its corners. */
+static float ArenaHalfWidth(const struct DioramaStageRequest *request, float north)
+{
+    float gx0, gy0, gx1, gy1, perTile, half;
+
+    if (!DioramaStage_Project(&request->view, 0.0f, 0.0f, -north, &gx0, &gy0)
+     || !DioramaStage_Project(&request->view, 1.0f, 0.0f, -north, &gx1, &gy1) || gx1 - gx0 < 1.0f)
+        return ARENA_MIN_HALF;
+    perTile = gx1 - gx0;
+    half = fmaxf(gx0 - request->visibleLeft, request->visibleRight - gx0) / perTile - ARENA_CORNER;
+    return Clamp(half, ARENA_MIN_HALF, ARENA_MAX_HALF);
+}
+
+static void ArenaQuad(unsigned *n, const float corners[4][3], uint16_t slot, float shade)
+{
+    static const uint8_t order[6] = {0, 1, 2, 0, 2, 3};
+    struct DioramaAtlasUv uv = DioramaAtlas_GetUv(slot);
+    const float u[4] = {uv.u0, uv.u1, uv.u1, uv.u0}, v[4] = {uv.v0, uv.v0, uv.v1, uv.v1};
+
+    if (slot == DIORAMA_ARENA_NO_SLOT || *n + 6 > ARENA_MAX_VERTICES)
+        return;
+    for (int i = 0; i < 6; ++i)
+    {
+        struct DioramaTerrainVertex *vertex = &sArenaVertices[(*n)++];
+        int c = order[i];
+
+        vertex->x = corners[c][0];
+        vertex->y = corners[c][1];
+        vertex->z = corners[c][2];
+        vertex->u = u[c];
+        vertex->v = v[c];
+        vertex->shade = shade;
+        vertex->textureLayer = 0.0f;
+        vertex->reflectionMask = 0.0f;
+        vertex->color = 0xFFFFFFFFu;
+    }
+}
+
+/* The arena's floor and walls as the terrain's vertices (the scene's x east, z north; a tile's centre on its map
+ * coordinates, z = -y), each quad's corners its picture's top left, top right, bottom right, bottom left; the
+ * terrain's own face shades (terrain_mesh.c: a top 1.0, a face to the south 0.82, to the east or west 0.68). */
+static unsigned BuildArena(const struct DioramaArena *a)
+{
+    float g = a->ground, west = (float)a->x0 - 0.5f, east = (float)(a->x0 + a->columns) - 0.5f;
+    float north = 0.5f - (float)a->y0;
+    unsigned n = 0;
+
+    for (int row = 0; row < a->rows; ++row)
+        for (int column = 0; column < a->columns; ++column)
+        {
+            float x0 = west + (float)column, z0 = north - (float)row;
+            const float c[4][3] = {{x0, g, z0}, {x0 + 1.0f, g, z0}, {x0 + 1.0f, g, z0 - 1.0f}, {x0, g, z0 - 1.0f}};
+
+            ArenaQuad(&n, c, a->floor[row][column], 1.0f);
+        }
+    if (!a->walls)
+        return n;
+    for (int k = 0; k < DIORAMA_ARENA_WALL_ROWS; ++k)
+    {
+        float top = g + (float)(DIORAMA_ARENA_WALL_ROWS - k), bottom = top - 1.0f;
+
+        for (int column = 0; column < a->columns; ++column)
+        {
+            float x0 = west + (float)column;
+            const float c[4][3] = {{x0, top, north}, {x0 + 1.0f, top, north}, {x0 + 1.0f, bottom, north},
+                                   {x0, bottom, north}};
+
+            ArenaQuad(&n, c, a->back[column][k], 0.82f);
+        }
+        for (int row = 0; row < a->rows; ++row)
+        {
+            float zn = north - (float)row, zs = zn - 1.0f;
+            /* seen from inside: the west wall's left is its south end, the east wall's its north end */
+            const float w[4][3] = {{west, top, zs}, {west, top, zn}, {west, bottom, zn}, {west, bottom, zs}};
+            const float e[4][3] = {{east, top, zn}, {east, top, zs}, {east, bottom, zs}, {east, bottom, zn}};
+
+            ArenaQuad(&n, w, a->west[row][k], 0.68f);
+            ArenaQuad(&n, e, a->east[row][k], 0.68f);
+        }
+    }
+    return n;
+}
+
+/* The arena's boxes for the clearing (gl_light.h DioramaGLLight_SetClearing): everything on its floor, and what
+ * stands over its floor for ARENA_MARGIN past its walls, so nothing in the room looks over them. */
+static void ArenaClearing(const struct DioramaArena *a, float inner[4], float outer[4], float *level)
+{
+    inner[0] = (float)a->x0 - 0.5f;
+    inner[1] = 0.5f - (float)(a->y0 + a->rows);
+    inner[2] = (float)(a->x0 + a->columns) - 0.5f;
+    inner[3] = 0.5f - (float)a->y0;
+    outer[0] = inner[0] - ARENA_MARGIN;
+    outer[1] = inner[1];
+    outer[2] = inner[2] + ARENA_MARGIN;
+    outer[3] = inner[3] + ARENA_MARGIN;
+    *level = a->ground + 0.05f;
+}
+
+/* The battle's world with the arena or without (DrawWorld: on for the battle's world, off after it). */
+static void ShowArena(bool on)
+{
+    float inner[4] = {0}, outer[4] = {0}, level = 0.0f;
+
+    if (!sBattle.arena.active || sBattle.arenaVertices == 0)
+        on = false;
+    DioramaGLTerrain_ShowArena(on);
+    DioramaGLBuildings_ShowArenaModels(on);
+    if (on)
+        ArenaClearing(&sBattle.arena, inner, outer, &level);
+    DioramaGLLight_SetClearing(on, inner, outer, on ? level : 0.0f);
+}
+
+/* The arena for the chosen stage, if it needs one (WantsArena); its vertices to the terrain renderer. */
+static void PlanArena(const struct DioramaStageRequest *request, const struct DioramaStageResult *result,
+                      const struct DioramaSceneSnapshot *snapshot, struct StageContext *context)
+{
+    struct DioramaArenaRequest a;
+    float north = 0.0f;
+
+    memset(&sBattle.arena, 0, sizeof(sBattle.arena));
+    sBattle.arenaVertices = 0;
+    DioramaGLTerrain_SetArena(NULL, 0);
+    DioramaGLBuildings_SetArenaModels(NULL, 0, 0.0f, 0);
+    if (!WantsArena(request, result, snapshot, ArenaMode(), &sBattle.arenaSeen, &sBattle.arenaLowBlack))
+        return;
+    for (unsigned b = 0; b < result->battlerCount && b < 4; ++b)
+        north = fmaxf(north, -result->battlerY[b]);
+    memset(&a, 0, sizeof(a));
+    a.targetX = result->targetX;
+    a.targetY = result->targetY;
+    a.ground = result->ground;
+    a.floorKind = result->want[0];
+    a.north = north + ARENA_BEHIND;
+    a.south = request->view.distance * cosf(request->view.pitch) + ARENA_PAST_EYE;
+    a.halfWidth = ArenaHalfWidth(request, a.north);
+    a.reach = ARENA_REACH;
+    a.cellAt = ArenaCellAt;
+    a.context = context;
+    a.objects = sArenaObjects;
+    a.objectCount = ArenaObjects(context, (int)floorf(result->targetX), (int)floorf(result->targetY));
+    a.battlerCount = result->battlerCount < 4 ? result->battlerCount : 4;
+    for (unsigned b = 0; b < a.battlerCount; ++b)
+    {
+        a.battlerX[b] = result->battlerX[b];
+        a.battlerY[b] = result->battlerY[b];
+    }
+    if (!DioramaArena_Plan(&a, &sBattle.arena))
+        return;
+    sBattle.arenaVertices = BuildArena(&sBattle.arena);
+    DioramaGLTerrain_SetArena(sArenaVertices, sBattle.arenaVertices);
+    {
+        struct DioramaGLArenaModel models[DIORAMA_ARENA_MAX_PIECES];
+        const struct DioramaCellSnapshot *source;
+        uint8_t page = 0;
+
+        if (StageResolvedAt(context, (int)floorf(result->targetX), (int)floorf(result->targetY), &source) != NULL
+         && source->atlasPage <= DIORAMA_NEIGHBOUR_PAGES)
+            page = source->atlasPage;
+        for (unsigned i = 0; i < sBattle.arena.pieceCount; ++i)
+        {
+            models[i].placement = sBattle.arena.pieces[i].id;
+            models[i].x = sBattle.arena.pieces[i].x;
+            models[i].y = sBattle.arena.pieces[i].y;
+        }
+        DioramaGLBuildings_SetArenaModels(models, sBattle.arena.pieceCount, sBattle.arena.ground, page);
+    }
+}
+
 static void ChooseStage(const struct Layout *layout, const struct DioramaSceneSnapshot *snapshot,
                         const struct DioramaResolvedCell *resolved)
 {
@@ -1458,6 +1810,7 @@ static void ChooseStage(const struct Layout *layout, const struct DioramaSceneSn
     sBattle.stage.focal = request.view.focal;
     sBattle.stage.row = request.view.targetRow;
     sBattle.chosen = true;
+    PlanArena(&request, result, snapshot, &context);
     if (sBattle.log)
     {
         int offsetX = sBattle.frame.playerGridX - sBattle.frame.playerMapX;
@@ -1471,6 +1824,20 @@ static void ChooseStage(const struct Layout *layout, const struct DioramaSceneSn
                 request.indoor ? " indoor" : "",
                 (double)(SDL_GetPerformanceCounter() - start) * 1000.0 / SDL_GetPerformanceFrequency(),
                 100.0f * result->seen.voidFraction, 100.0f * result->seen.overlap, result->seen.cramped);
+        SDL_Log("Diorama battle stage: in the default window's picture (the arena's measure): black %.1f%% "
+                "(from the battle's row down %.1f%%), a battler covered %.0f%%, pressed %.2f",
+                100.0f * sBattle.arenaSeen.voidFraction, 100.0f * sBattle.arenaLowBlack,
+                100.0f * sBattle.arenaSeen.overlap, sBattle.arenaSeen.cramped);
+        if (sBattle.arena.active)
+            SDL_Log("Diorama battle stage: no clear stage here - the room's own arena (KNOWN_ISSUES V10): floor %dx%d "
+                    "from %d,%d at %.2f, its pattern %dx%d from %d tiles; walls %s (%d columns of the north wall); "
+                    "%u of the room's objects set round it (%ux%u, %.2f tall); %u vertices",
+                    sBattle.arena.columns, sBattle.arena.rows, sBattle.arena.x0, sBattle.arena.y0,
+                    sBattle.arena.ground, sBattle.arena.periodX, sBattle.arena.periodY, sBattle.arena.floorSamples,
+                    sBattle.arena.walls ? "of the room's art" : "none", sBattle.arena.wallColumns,
+                    sBattle.arena.pieceCount, sBattle.arena.pieceCount ? sBattle.arena.pieces[0].width : 0u,
+                    sBattle.arena.pieceCount ? sBattle.arena.pieces[0].height : 0u,
+                    sBattle.arena.pieceCount ? sBattle.arena.pieces[0].top : 0.0f, sBattle.arenaVertices);
         /* The ground round the player as the search read it: . plain, g grass,
          * s sand, ~ water, space nothing, # something tall, L lava (nobody
          * stands on it), ? not in the scene, P the player. */
@@ -1514,6 +1881,7 @@ struct SurveyTally
     int worstX, worstY;
     bool worstDoubles;
     unsigned lava;   /* stages with a battler on lava (StageLavaAt) */
+    unsigned arena;  /* stages a battle would stand in the room's own arena at (WantsArena, KNOWN_ISSUES V10) */
     uint32_t stages; /* FNV-1a of every target chosen, in the survey's order: two runs compared stage for stage */
 };
 
@@ -1631,6 +1999,12 @@ static void SurveyStages(const struct DioramaSceneSnapshot *snapshot, const stru
                 request.doubles = d != 0;
                 DioramaStage_Choose(&request, &result);
                 Tally(&tally[1], &result.seen, x, y, d != 0);
+                {
+                    struct DioramaStageView measured;
+                    float lowBlack;
+
+                    tally[1].arena += WantsArena(&request, &result, snapshot, 1, &measured, &lowBlack);
+                }
                 TallyStage(&tally[1], &now, &result);
                 /* As before: the 3DS scoring on the cells as they were read;
                  * measured as the camera sees it now. */
@@ -1655,10 +2029,14 @@ static void SurveyStages(const struct DioramaSceneSnapshot *snapshot, const stru
         const struct SurveyTally *t = &tally[d];
 
         SDL_Log("Diorama stage survey:   %s: a battler covered %u, black over 2%% %u (mean %.1f%%), "
-                "pressed %u; worst at %d,%d%s (covered + black %.0f%%); a battler on lava %u; stages %08x",
+                "pressed %u; worst at %d,%d%s (covered + black %.0f%%); a battler on lava %u; stages %08x%s",
                 d == 0 ? "3DS scoring" : "now        ", t->covered, t->black, 100.0f * t->blackSum / t->spots,
                 t->pressed, t->worstX - SURVEY_MAP_OFFSET, t->worstY - SURVEY_MAP_OFFSET,
-                t->worstDoubles ? " doubles" : "", 100.0f * t->worst, t->lava, (unsigned)t->stages);
+                t->worstDoubles ? " doubles" : "", 100.0f * t->worst, t->lava, (unsigned)t->stages,
+                d == 1 && t->arena != 0 ? "; in the room's own arena" : "");
+        if (d == 1 && t->arena != 0)
+            SDL_Log("Diorama stage survey:   the room's own arena (KNOWN_ISSUES V10) at %u of the %u stages",
+                    t->arena, t->spots);
     }
 }
 
@@ -1769,6 +2147,12 @@ static void End(void)
                     AverageFrameTime(&sFrameTime.glide), sFrameTime.glide.max, sFrameTime.glide.count);
         }
     }
+    /* the arena is this battle's alone */
+    memset(&sBattle.arena, 0, sizeof(sBattle.arena));
+    sBattle.arenaVertices = 0;
+    ShowArena(false);
+    DioramaGLTerrain_SetArena(NULL, 0);
+    DioramaGLBuildings_SetArenaModels(NULL, 0, 0.0f, 0);
     sTileAnim.ready = false;
     sWorldCache.valid = false;
     sWide.valid = false;
@@ -3173,9 +3557,11 @@ static void DrawWorld(const struct Layout *layout)
     SceneLayout(layout, sceneW, sceneH, &scene);
     ApplyView(&sBattle.view, &scene, &focal, &aspect);
     sFrameTime.drew = true;
+    ShowArena(true); /* a cramped room's own arena, where there is one (KNOWN_ISSUES V10) */
     DioramaGL_DrawBattleWorld(sBattle.view.x, sBattle.view.z, sBattle.view.pitch, focal, aspect,
                               scene.outW, scene.outH);
     DrawCurtain(&scene, focal, aspect);
+    ShowArena(false);
     DrawWorldPasses(&scene);
 #ifdef DIORAMA_BATTLE_ENV_TEST
     if (sTest.stem != NULL)

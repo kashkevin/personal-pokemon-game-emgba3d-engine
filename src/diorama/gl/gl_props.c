@@ -239,6 +239,7 @@ static const char sFragmentShader[] =
     "  vec4 texel = texture(artTexture, artUv);\n"
     "  if (texel.a < 0.5) discard;\n" /* no colour, no depth */
     "  if (shadowPass == 1) { color = vec4(1.0); return; }\n"
+    "  if (Cleared(sceneWorldPosition)) discard;\n" /* a 3D battle's arena (gl_light.h) */
     "  color = vec4(Grade(texel.rgb) * Light(shade * mix(shadowAmbient, 1.0, SunLit()))\n"
     "             * Dapple(sceneWorldPosition), 1.0);\n"
     "  color.rgb += Grade(texel.rgb) * Lamps(sceneWorldPosition);\n"

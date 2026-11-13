@@ -374,6 +374,11 @@ static uint32_t sClaimDebugVertexCount;
 static struct DioramaTerrainVertex sFarVertices[DIORAMA_FAR_MAX_VERTICES];
 static struct DioramaFarSector sFarSectors[DIORAMA_FAR_SECTORS];
 static GLuint sFarVertexArray;
+/* A 3D battle's arena (DioramaGLTerrain_SetArena). */
+static GLuint sArenaVertexArray;
+static GLuint sArenaVertexBuffer;
+static uint32_t sArenaVertexCount;
+static bool sArenaShown;
 static GLuint sFarVertexBuffer;
 static uint32_t sFarVertexCount;
 static uint32_t sFarGeneration;
@@ -488,6 +493,8 @@ static const char sTerrainFragmentShader[] =
     "    if (caster.a < 0.5) discard;\n"
     "    color = vec4(1.0); return;\n"
     "  }\n"
+    /* a 3D battle's arena in a cramped room: what stands in it cleared away (gl_light.h) */
+    "  if (Cleared(sceneWorldPosition)) discard;\n"
     "  if (renderPass == 1) {\n"
     "    if (reflectionMask < 0.5 || texture(foregroundImage, uv).a >= 0.5) discard;\n"
     "    color = vec4(1.0); return;\n"
@@ -4250,6 +4257,31 @@ static void CheckTrees(uint32_t oldCount, uint32_t newCount, int range)
             sFramesDiffering, sFrames, (unsigned long long)sPixelsDiffering);
 }
 
+void DioramaGLTerrain_SetArena(const struct DioramaTerrainVertex *vertices, uint32_t count)
+{
+    if (vertices == NULL || count == 0)
+    {
+        sArenaVertexCount = 0;
+        return;
+    }
+    if (sArenaVertexArray == 0)
+    {
+        dglGenVertexArrays(1, &sArenaVertexArray);
+        dglGenBuffers(1, &sArenaVertexBuffer);
+        ConfigureVertexArray(sArenaVertexArray, sArenaVertexBuffer);
+    }
+    dglBindVertexArray(sArenaVertexArray);
+    dglBindBuffer(GL_ARRAY_BUFFER, sArenaVertexBuffer);
+    dglBufferData(GL_ARRAY_BUFFER, count * sizeof(*vertices), vertices, GL_STATIC_DRAW);
+    dglBindVertexArray(0);
+    sArenaVertexCount = count;
+}
+
+void DioramaGLTerrain_ShowArena(bool shown)
+{
+    sArenaShown = shown;
+}
+
 void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
                            GLuint foregroundAtlasTexture, float cameraX, float cameraZ,
                            float cameraPitch, float focalLength,
@@ -4420,6 +4452,20 @@ void DioramaGLTerrain_Draw(GLuint atlasTexture, GLuint baseAtlasTexture,
     }
     sMetrics.visibleTreeInstances = visibleTreeCount;
     sMetrics.treeModelVertices = sTreeRangeCount[treeRange];
+    /* A 3D battle's arena (DioramaGLTerrain_SetArena): in the scene's own coordinates, and never cleared away
+     * (it stands in the clearing it makes). */
+    if (sArenaShown && sArenaVertexCount != 0 && !debug)
+    {
+        DioramaGLLight_ApplyClearing(&sLightUniforms, false);
+        dglUniform3f(sMeshShiftLocation, 0.0f, 0.0f, 0.0f);
+        dglBindVertexArray(sArenaVertexArray);
+        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)sArenaVertexCount);
+        sMetrics.vertices += sArenaVertexCount;
+        sMetrics.triangles += sArenaVertexCount / 3;
+        sMetrics.drawCalls++;
+        dglUniform3f(sMeshShiftLocation, -(float)sShiftX, 0.0f, (float)sShiftY);
+        DioramaGLLight_ApplyClearing(&sLightUniforms, true);
+    }
     if (debug)
         glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     glEnable(GL_STENCIL_TEST);
@@ -4635,6 +4681,14 @@ void DioramaGLTerrain_Shutdown(void)
         dglDeleteBuffers(1, &sFarVertexBuffer);
     if (sFarVertexArray != 0)
         dglDeleteVertexArrays(1, &sFarVertexArray);
+    if (sArenaVertexBuffer != 0)
+        dglDeleteBuffers(1, &sArenaVertexBuffer);
+    if (sArenaVertexArray != 0)
+        dglDeleteVertexArrays(1, &sArenaVertexArray);
+    sArenaVertexBuffer = 0;
+    sArenaVertexArray = 0;
+    sArenaVertexCount = 0;
+    sArenaShown = false;
     sFarVertexBuffer = 0;
     sFarVertexArray = 0;
     sFarVertexCount = 0;

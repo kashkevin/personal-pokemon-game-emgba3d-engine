@@ -109,6 +109,14 @@ static uint32_t sChangedHash; /* the placements left out (DioramaBuildings_Valid
 static uint8_t sPaletteRgba[PALETTE_ROWS * 256 * 4];
 static bool sHasPalette;
 static struct DioramaBuildingMetrics sMetrics;
+/* A 3D battle's arena (DioramaGLBuildings_SetArenaModels): its copies' triangles, a batch a page, apart from the
+ * map's own (which a sync rebuilds). */
+#define ARENA_MAX_BATCHES 8
+static GLuint sArenaVertexArray;
+static GLuint sArenaVertexBuffer;
+static struct Batch sArenaBatches[ARENA_MAX_BATCHES];
+static unsigned sArenaBatchCount;
+static bool sArenaShown;
 
 static const char sVertexShader[] =
     "#version 330 core\n"
@@ -189,6 +197,7 @@ static const char sFragmentShader[] =
     "  int slot = int(pageTexel.r * 255.0 + 0.5);\n"
     "  if (slot == 255) discard;\n"
     "  if (shadowPass == 1) { color = vec4(1.0); return; }\n"
+    "  if (Cleared(sceneWorldPosition)) discard;\n" /* a 3D battle's arena (gl_light.h) */
     "  vec3 texelColour = Grade(texelFetch(palette, ivec2(slot, paletteRow), 0).rgb);\n"
     "  color = vec4(texelColour\n"
     "             * Light(shade * mix(shadowAmbient, 1.0, SunLit()))\n"
@@ -277,6 +286,23 @@ static bool CreateProgram(void)
         && sShadowAmbientLocation >= 0 && sSaturationLocation >= 0 && lightLocated;
 }
 
+static void ConfigureVertexArray(GLuint vertexArray, GLuint vertexBuffer)
+{
+    dglBindVertexArray(vertexArray);
+    dglBindBuffer(GL_ARRAY_BUFFER, vertexBuffer);
+    dglEnableVertexAttribArray(0);
+    dglVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(struct GLBuildingVertex), NULL);
+    dglEnableVertexAttribArray(1);
+    dglVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(struct GLBuildingVertex),
+                           (void *)offsetof(struct GLBuildingVertex, u));
+    dglEnableVertexAttribArray(2);
+    dglVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(struct GLBuildingVertex),
+                           (void *)offsetof(struct GLBuildingVertex, shade));
+    dglEnableVertexAttribArray(3);
+    dglVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(struct GLBuildingVertex),
+                           (void *)offsetof(struct GLBuildingVertex, paletteRow));
+}
+
 bool DioramaGLBuildings_Init(void)
 {
     sReady = false;
@@ -293,19 +319,7 @@ bool DioramaGLBuildings_Init(void)
     dglGenVertexArrays(1, &sVertexArray);
     dglGenBuffers(1, &sVertexBuffer);
     sBufferHoldsUploaded = false;
-    dglBindVertexArray(sVertexArray);
-    dglBindBuffer(GL_ARRAY_BUFFER, sVertexBuffer);
-    dglEnableVertexAttribArray(0);
-    dglVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(struct GLBuildingVertex), NULL);
-    dglEnableVertexAttribArray(1);
-    dglVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, sizeof(struct GLBuildingVertex),
-                           (void *)offsetof(struct GLBuildingVertex, u));
-    dglEnableVertexAttribArray(2);
-    dglVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, sizeof(struct GLBuildingVertex),
-                           (void *)offsetof(struct GLBuildingVertex, shade));
-    dglEnableVertexAttribArray(3);
-    dglVertexAttribPointer(3, 1, GL_FLOAT, GL_FALSE, sizeof(struct GLBuildingVertex),
-                           (void *)offsetof(struct GLBuildingVertex, paletteRow));
+    ConfigureVertexArray(sVertexArray, sVertexBuffer);
     glGenTextures(1, &sPaletteTexture);
     glBindTexture(GL_TEXTURE_2D, sPaletteTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
@@ -789,13 +803,85 @@ uint32_t DioramaGLBuildings_GetGeometryGeneration(void)
     return sGeometryGeneration;
 }
 
+void DioramaGLBuildings_SetArenaModels(const struct DioramaGLArenaModel *models, unsigned count, float lift,
+                                       uint8_t paletteRow)
+{
+    const struct DioramaBuildingVertex *source = DioramaBuildings_Vertices();
+    struct GLBuildingVertex *vertices;
+    uint32_t capacity = 0, n = 0;
+    unsigned page, i;
+
+    sArenaBatchCount = 0;
+    if (!sReady || models == NULL || count == 0 || source == NULL)
+        return;
+    for (i = 0; i < count; i++)
+    {
+        struct DioramaBuildingPlacementInfo info;
+
+        if (DioramaBuildings_GetPlacement(models[i].placement, &info))
+            capacity += info.vertexCount;
+    }
+    if (capacity == 0 || (vertices = malloc((size_t)capacity * sizeof(*vertices))) == NULL)
+        return;
+    for (page = 0; page < sPageTextureCount && sArenaBatchCount < ARENA_MAX_BATCHES; page++)
+    {
+        uint32_t start = n;
+
+        for (i = 0; i < count; i++)
+        {
+            struct DioramaBuildingPlacementInfo info;
+            /* as AppendPlacement: the model from its north-west cell's corner, x east, z south; the scene's z north */
+            float worldX = (float)models[i].x - 0.5f, worldZ = (float)models[i].y - 0.5f;
+
+            if (!DioramaBuildings_GetPlacement(models[i].placement, &info) || info.page != page)
+                continue;
+            for (uint32_t v = 0; v < info.vertexCount && n < capacity; v++)
+            {
+                const struct DioramaBuildingVertex *s = &source[info.firstVertex + v];
+                struct GLBuildingVertex *out = &vertices[n++];
+
+                out->x = s->x + worldX;
+                out->y = s->y + lift;
+                out->z = -(s->z + worldZ);
+                out->u = s->u + info.pageX;
+                out->v = s->v + info.pageY;
+                out->shade = s->shade;
+                out->paletteRow = paletteRow;
+            }
+        }
+        if (n != start)
+        {
+            sArenaBatches[sArenaBatchCount].page = (uint16_t)page;
+            sArenaBatches[sArenaBatchCount].first = start;
+            sArenaBatches[sArenaBatchCount].count = n - start;
+            sArenaBatchCount++;
+        }
+    }
+    if (sArenaVertexArray == 0)
+    {
+        dglGenVertexArrays(1, &sArenaVertexArray);
+        dglGenBuffers(1, &sArenaVertexBuffer);
+        ConfigureVertexArray(sArenaVertexArray, sArenaVertexBuffer);
+    }
+    dglBindVertexArray(sArenaVertexArray);
+    dglBindBuffer(GL_ARRAY_BUFFER, sArenaVertexBuffer);
+    dglBufferData(GL_ARRAY_BUFFER, (size_t)n * sizeof(*vertices), vertices, GL_STATIC_DRAW);
+    dglBindVertexArray(0);
+    free(vertices);
+}
+
+void DioramaGLBuildings_ShowArenaModels(bool shown)
+{
+    sArenaShown = shown;
+}
+
 void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,
                              float focalLength, float aspectCorrection)
 {
     unsigned i;
 
     sMetrics.drawCalls = 0;
-    if (!sReady || sBatchCount == 0)
+    if (!sReady || (sBatchCount == 0 && !(sArenaShown && sArenaBatchCount != 0)))
         return;
     dglUseProgram(sProgram);
     dglUniform2f(sCameraLocation, cameraX, cameraZ);
@@ -842,6 +928,23 @@ void DioramaGLBuildings_Draw(float cameraX, float cameraZ, float cameraPitch,
         glBindTexture(GL_TEXTURE_2D, texture);
         glDrawArrays(GL_TRIANGLES, (GLint)sBatches[i].first, (GLsizei)sBatches[i].count);
         sMetrics.drawCalls++;
+    }
+    /* A 3D battle's arena (DioramaGLBuildings_SetArenaModels): never cleared away, it stands in its own clearing. */
+    if (sArenaShown && sArenaBatchCount != 0)
+    {
+        DioramaGLLight_ApplyClearing(&sLightUniforms, false);
+        dglBindVertexArray(sArenaVertexArray);
+        for (i = 0; i < sArenaBatchCount; i++)
+        {
+            GLuint texture = PageTexture(sArenaBatches[i].page);
+
+            if (texture == 0)
+                continue;
+            glBindTexture(GL_TEXTURE_2D, texture);
+            glDrawArrays(GL_TRIANGLES, (GLint)sArenaBatches[i].first, (GLsizei)sArenaBatches[i].count);
+            sMetrics.drawCalls++;
+        }
+        DioramaGLLight_ApplyClearing(&sLightUniforms, true);
     }
     glDisable(GL_DEPTH_TEST);
 }
@@ -911,6 +1014,14 @@ void DioramaGLBuildings_Shutdown(void)
     sPaletteTexture = 0;
     if (sVertexBuffer != 0)
         dglDeleteBuffers(1, &sVertexBuffer);
+    if (sArenaVertexBuffer != 0)
+        dglDeleteBuffers(1, &sArenaVertexBuffer);
+    if (sArenaVertexArray != 0)
+        dglDeleteVertexArrays(1, &sArenaVertexArray);
+    sArenaVertexBuffer = 0;
+    sArenaVertexArray = 0;
+    sArenaBatchCount = 0;
+    sArenaShown = false;
     if (sVertexArray != 0)
         dglDeleteVertexArrays(1, &sVertexArray);
     if (sProgram != 0)
