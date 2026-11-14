@@ -973,6 +973,11 @@ def interior_specs(spec):
             # stand at the doorway's top
             if pc.get("foot") is not None:
                 foot = pc["foot"] - y0 * 16
+            elif pc.get("each_foot"):
+                # each column on its own drawn foot, as a wall's: a case whose front corner is
+                # cut on the slant (the Elite Four's), its side by the arena not standing out
+                # past the corner as a spike (the object audit of 2026-11-14)
+                foot = None
             else:
                 foot = None if pc.get("fill") else max(y for _, y in mine) + 1 - y0 * 16
             back = pc.get("back") if pc.get("against") is None else pc["against"]

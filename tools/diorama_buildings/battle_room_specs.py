@@ -34,7 +34,7 @@ def _helpers():
 #     rows   8- 48  its face: panels with red lamps, the door to the next room in the middle,
 #                   the arena's spotlights along its foot
 #     rows  48- 64  the floor's dark border along the wall
-#     rows  66-148  at either side (columns 0-1 and 11-12, collision rows 4-8) a long low case,
+#     rows  66-147  at either side (columns 0-1 and 11-12, collision rows 4-8) a long low case,
 #                   its contents seen from above: Sidney's tiered seats, Phoebe's mossy stones,
 #                   Glacia's ice, Drake's spikes
 #     rows 166-224  the front wall's top and face, the way in - never stood up
@@ -50,10 +50,14 @@ E4_WALL_SIDE = (32, 8, 48, 48)     # a stretch of plain panel: lamp post, panels
 
 def elite_four_room():
     facet, own_shell, piece = _helpers()
-    case_l = piece("case_w", [(0, 64, 32, 152)], 12, back=64, solid=True,
-                   side=(4, 136, 20, 148))
-    case_r = piece("case_e", [(176, 64, 208, 152)], 12, back=64, solid=True,
-                   side=(188, 136, 204, 148))
+    # each case's drawing ends at row 147, its corner by the arena cut on the slant; the rows
+    # under it are the floor's dark border, and each column stands on its own drawn foot (the
+    # object audit of 2026-11-14: all on row 152, the side by the arena stood out past the
+    # slanted corner as a spike)
+    case_l = piece("case_w", [(0, 64, 32, 147)], 12, back=64, solid=True,
+                   side=(4, 134, 20, 146), each_foot=True)
+    case_r = piece("case_e", [(176, 64, 208, 147)], 12, back=64, solid=True,
+                   side=(188, 134, 204, 146), each_foot=True)
     return own_shell([
         case_l,
         case_r,

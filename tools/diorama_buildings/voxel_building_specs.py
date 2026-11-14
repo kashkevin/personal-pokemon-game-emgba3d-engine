@@ -592,7 +592,7 @@ WALL_COLOURS = ("f6b473", "de7b31", "ffe6b4")   # the Center's orange wall
 
 def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=False,
           back=None, card=False, top=None, foot=None, walls=(), cells=(), against=None,
-          claim=(), under=True, fill_down=()):
+          claim=(), under=True, fill_down=(), each_foot=False):
     """`back`: the Z its top runs back to, where the cartridge's collision
     says it ends (or the wall it stands against); `against`: that wall's Z,
     where a top drawn deeper than the room in front of it stops, its back
@@ -603,12 +603,14 @@ def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=Fal
     - facing left of a->b - dressed with `side`; `under` False: the floor its
     drawing hides is bare, no mark either side of it carried under it;
     `fill_down`: a wall's rectangles where what stands before it is filled from
-    the wall's own pixels above in the same column (gen_voxel_buildings.hidden_source)."""
+    the wall's own pixels above in the same column (gen_voxel_buildings.hidden_source);
+    `each_foot`: each column stands on its own drawn foot, as a wall's, not all on
+    the lowest - a front cut on the slant follows its drawing."""
     return {"name": name, "shape": shape, "height": height, "base": base,
             "fill": fill, "leave": leave, "side": side, "solid": solid,
             "back": back, "card": card, "top": top, "foot": foot, "walls": walls,
             "cells": cells, "against": against, "claim": claim, "under": under,
-            "fill_down": fill_down}
+            "fill_down": fill_down, "each_foot": each_foot}
 
 
 def own_shell(pieces):
@@ -691,9 +693,12 @@ POKEMON_CENTER_1F = [
 POKEMON_CENTER_2F = [
     # the three link terminals, in front of the counter, and the glass
     # tubes that stand behind them
-    piece("terminal_1", [(48, 40, 64, 73)], 24, leave=WALL_COLOURS, back=48),
-    piece("terminal_2", [(128, 54, 144, 81)], 20, back=64),
-    piece("terminal_3", [(192, 54, 208, 81)], 20, back=64),
+    # their sides a column of their own grey casing (solid): drawn from the edge column, projected,
+    # every row of it ran across the side as a stripe (the object audit of 2026-11-14)
+    piece("terminal_1", [(48, 40, 64, 73)], 24, leave=WALL_COLOURS, back=48, solid=True,
+          side=(50, 49, 51, 73)),
+    piece("terminal_2", [(128, 54, 144, 81)], 20, back=64, solid=True, side=(131, 61, 132, 81)),
+    piece("terminal_3", [(192, 54, 208, 81)], 20, back=64, solid=True, side=(195, 61, 196, 81)),
     piece("gate_1", [(80, 46, 96, 57)], 8),
     piece("gate_2", [(144, 46, 160, 57)], 8),
     piece("counter", [(0, 40, 48, 63), (64, 40, 80, 63), (96, 40, 128, 63),

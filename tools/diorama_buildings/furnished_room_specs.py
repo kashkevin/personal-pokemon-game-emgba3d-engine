@@ -1474,8 +1474,11 @@ def furnished_room_specs():
         },
         {
             "name": "hall_of_fame",
+            # each cell's own drawing under the walls: with the purple floor there, the black drawn
+            # past the walls' ends showed a purple hairline at its decal's edge, off both back corners
+            # into the dark (the object audit of 2026-11-14)
             "interior": {"layout": "LAYOUT_EVER_GRANDE_CITY_HALL_OF_FAME", "ground": [0x2F6],
-                         "reuse_in": frozenset(), "pieces": hall_of_fame()},
+                         "under": "own", "reuse_in": frozenset(), "pieces": hall_of_fame()},
         },
         {
             "name": "store_rooftop",
