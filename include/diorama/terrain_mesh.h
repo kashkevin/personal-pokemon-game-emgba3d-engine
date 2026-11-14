@@ -111,6 +111,9 @@ struct DioramaTerrainCell
     uint8_t treeHullReady;
     uint8_t treeMaskDirect;
     uint8_t rockMass;   /* a cell of a mountain's rock (gl_terrain_renderer.c ShapeRockMasses) */
+    /* tall grass (props.h DioramaProps_IsTallGrass): its outline beside other flat ground is drawn soft
+     * (terrain_mesh.c AppendGrassEdges; the owner's decision #59) */
+    uint8_t softGrass;
     /* the rock over a cave's mouth (gl_terrain_renderer.c FindCaveTunnels): a face to its south, the tunnel cut
      * DIORAMA_CAVE_TUNNEL_DEPTH voxels into it from the mouth's ground (tunnelFloor, in voxels), each pixel
      * column's opening that many voxels high (0: rock) */

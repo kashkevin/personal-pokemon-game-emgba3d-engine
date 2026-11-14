@@ -508,7 +508,7 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
          * neither, and the rules give an elevation-0 cell its neighbours' (rules.c), which change as the grid moves,
          * so it rebuilt the same mesh (a walk's recorded chunks: 72 of 557 builds, a quarter of their time;
          * KNOWN_ISSUES MS-118). A field the mesher reads must be hashed here. */
-        at = SigRoom(&stream, at); /* 90 bytes, to measuredConfidence */
+        at = SigRoom(&stream, at); /* 91 bytes, to measuredConfidence */
         at = PutByte(at, cell->present);
         at = PutU16(at, cell->claimOwner);
         at = PutU16(at, cell->mapX);
@@ -534,6 +534,7 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
         at = PutByte(at, cell->treeHullReady);
         at = PutByte(at, cell->treeMaskDirect);
         at = PutByte(at, cell->rockMass);
+        at = PutByte(at, cell->softGrass);
         at = PutByte(at, cell->structureRoofRows);
         at = PutByte(at, cell->structureLocalX);
         at = PutByte(at, cell->structureLocalY);
@@ -2664,6 +2665,266 @@ static bool AppendTreeHulls(const struct DioramaTerrainChunkInput *input,
     return true;
 }
 
+/*
+ * Tall grass's outline (the owner's decision #59, KNOWN_ISSUES MS-248 C). Tall grass is drawn flat, its art
+ * filling each cell to the cell's edge, so a patch's outline ran straight along the cells and turned square at
+ * its corners. Where a tall-grass cell (softGrass) borders flat ground at its own height that is not tall grass,
+ * the outline wanders a few pixels either side of the cell's edge, tuft by tuft: inside it the ground beside is
+ * laid over the grass (at most GRASS_EDGE_ERODE pixels), outside it the grass is laid over plain grass beside it
+ * (at most GRASS_EDGE_SPILL pixels; over other ground it stays inside); it changes smoothly along the edge, the
+ * same where two cells' edges meet, and the patch's outer corners are rounded (GRASS_EDGE_CORNER pixels). Each
+ * art is drawn mirrored across the edge, continuous with itself there. Only the drawing changes: the cells, their
+ * heights, collision and encounters stay as they are.
+ */
+#define GRASS_EDGE_ERODE 4
+#define GRASS_EDGE_SPILL 3
+#define GRASS_EDGE_CORNER 9
+#define GRASS_EDGE_STEP 4
+#define GRASS_EDGE_LIFT (1.0f / 256.0f)
+#define GRASS_PLAIN_METATILE 0x001 /* the General tileset's plain grass, the tall grass's own ground */
+
+enum { GRASS_SIDE_NORTH, GRASS_SIDE_EAST, GRASS_SIDE_SOUTH, GRASS_SIDE_WEST };
+static const int8_t sGrassSideX[4] = {0, 1, 0, -1};
+static const int8_t sGrassSideY[4] = {-1, 0, 1, 0};
+
+static bool PlainMaterial(const struct DioramaTerrainMaterial *material)
+{
+    return material->layer != DIORAMA_MATERIAL_NONE && material->rotation == 0 && material->flags == 0;
+}
+
+static bool IsSoftGrassCell(const struct DioramaTerrainCell *cell)
+{
+    return cell != NULL && cell->present && cell->softGrass && cell->shape == DIORAMA_SHAPE_FLAT
+        && (cell->archetype == DIORAMA_ARCHETYPE_GRASS || cell->archetype == DIORAMA_ARCHETYPE_GROUND)
+        && PlainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP]);
+}
+
+/* The flat ground beside a tall-grass cell's side that its outline is softened against, or NULL. */
+static const struct DioramaTerrainCell *GrassEdgeGround(const struct DioramaTerrainChunkInput *input,
+                                                         const struct DioramaTerrainCell *cell, int side)
+{
+    const struct DioramaTerrainCell *ground;
+
+    if (!IsSoftGrassCell(cell))
+        return NULL;
+    ground = FindInputCell(input, cell->mapX + sGrassSideX[side], cell->mapY + sGrassSideY[side]);
+    if (ground == NULL || ground->softGrass || ground->reflective || ground->shape != DIORAMA_SHAPE_FLAT
+     || (ground->archetype != DIORAMA_ARCHETYPE_GROUND && ground->archetype != DIORAMA_ARCHETYPE_FLOWER)
+     || HeightToVoxel(ground->visualHeight) != HeightToVoxel(cell->visualHeight)
+     || !PlainMaterial(&ground->materials[DIORAMA_MATERIAL_FACE_TOP]))
+        return NULL;
+    return ground;
+}
+
+/* Whether a cell's side is part of the soft outline (1), and the grass may reach over the ground beside it (2). */
+static int GrassEdgeKind(const struct DioramaTerrainChunkInput *input, int mapX, int mapY, int side)
+{
+    const struct DioramaTerrainCell *cell = FindInputCell(input, mapX, mapY);
+    const struct DioramaTerrainCell *ground = cell != NULL ? GrassEdgeGround(input, cell, side) : NULL;
+
+    if (ground == NULL)
+        return 0;
+    return ground->metatileId == GRASS_PLAIN_METATILE && cell->metatileId < 0x200 ? 2 : 1;
+}
+
+/* A control point's offset in pixels: by its place on the grid of the edges' points (in steps along the cells'
+ * edges) and the edge's side the grass is on - the same for both cells that share it; past the cell's edge
+ * (positive) only where the grass may reach over the ground beside it. */
+static float GrassEdgeControl(int32_t pointX, int32_t pointY, uint32_t side, bool spill)
+{
+    uint32_t h = (uint32_t)pointX * 0x8DA6B343u ^ (uint32_t)pointY * 0xD8163841u ^ (side + 1) * 0xCB1AB31Fu;
+    float u;
+
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12;
+    h *= 0x297A2D39u;
+    h ^= h >> 15;
+    u = (float)(h >> 8) / 16777216.0f;
+    return spill ? -GRASS_EDGE_ERODE + u * (GRASS_EDGE_ERODE + GRASS_EDGE_SPILL) : -u * GRASS_EDGE_ERODE;
+}
+
+static float GrassEdgeEase(float a, float b, float f)
+{
+    return a + (b - a) * (1.0f - cosf(f * 3.14159265f)) * 0.5f;
+}
+
+/* The rounding of a patch's outer corner, t pixels along the side from it. */
+static float GrassEdgeRound(float t)
+{
+    float r = (float)GRASS_EDGE_CORNER;
+    float across = r - t;
+
+    return t >= r ? 0.0f : r - sqrtf(r * r - across * across);
+}
+
+/* One run of a side's outline, columns (or, on a west or east side, rows) [from, to) of the cell: offset < 0, the
+ * ground beside laid that many pixels into the cell; offset > 0, the grass laid that many pixels past its edge,
+ * each mirrored across the edge. */
+static bool AppendGrassEdgeRun(const struct DioramaTerrainCell *cell, const struct DioramaTerrainMaterial *beside,
+                               int side, int from, int to, int offset,
+                               struct DioramaTerrainVertex *vertices, uint32_t capacity,
+                               uint32_t *vertexCount, struct DioramaTerrainMesh *mesh)
+{
+    const float inset = 0.02f / DIORAMA_VOXELS_PER_CELL;
+    const float cell16 = (float)DIORAMA_VOXELS_PER_CELL;
+    const struct DioramaTerrainMaterial *art = offset < 0 ? beside : &cell->materials[DIORAMA_MATERIAL_FACE_TOP];
+    int depth = offset < 0 ? -offset : offset;
+    int32_t originX = cell->mapX * DIORAMA_VOXELS_PER_CELL;
+    int32_t originZ = cell->mapY * DIORAMA_VOXELS_PER_CELL;
+    float height = VoxelY(HeightToVoxel(cell->visualHeight)) + GRASS_EDGE_LIFT;
+    struct DioramaTerrainMaterial material = *art;
+    float positions[4][3];
+    float left, right, north, south;
+    float du = art->u1 - art->u0;
+    float dv = art->v1 - art->v0;
+    /* the art's pixels from the edge: the ground beside its own last ones (inside the cell), the grass its first
+     * ones (past it) - near (at the edge) and far */
+    float nearEdge, farEdge;
+
+    if (side == GRASS_SIDE_NORTH || side == GRASS_SIDE_WEST)
+    {
+        nearEdge = offset < 0 ? 1.0f - inset : inset;
+        farEdge = offset < 0 ? (DIORAMA_VOXELS_PER_CELL - depth) / cell16 + inset : depth / cell16 - inset;
+    }
+    else
+    {
+        nearEdge = offset < 0 ? inset : 1.0f - inset;
+        farEdge = offset < 0 ? depth / cell16 - inset : (DIORAMA_VOXELS_PER_CELL - depth) / cell16 + inset;
+    }
+    if (side == GRASS_SIDE_NORTH || side == GRASS_SIDE_SOUTH)
+    {
+        int32_t edge = side == GRASS_SIDE_NORTH ? originZ : originZ + DIORAMA_VOXELS_PER_CELL;
+        /* the strip's other side: into the cell (south of a north edge) when offset < 0 */
+        int32_t far = edge + ((side == GRASS_SIDE_NORTH) == (offset < 0) ? depth : -depth);
+        bool farIsSouth = far > edge;
+
+        left = VoxelX(originX + from);
+        right = VoxelX(originX + to);
+        north = VoxelZ(farIsSouth ? edge : far);
+        south = VoxelZ(farIsSouth ? far : edge);
+        material.u0 = art->u0 + du * (from / cell16 + inset);
+        material.u1 = art->u0 + du * (to / cell16 - inset);
+        material.v0 = art->v0 + dv * (farIsSouth ? nearEdge : farEdge);
+        material.v1 = art->v0 + dv * (farIsSouth ? farEdge : nearEdge);
+    }
+    else
+    {
+        int32_t edge = side == GRASS_SIDE_WEST ? originX : originX + DIORAMA_VOXELS_PER_CELL;
+        int32_t far = edge + ((side == GRASS_SIDE_WEST) == (offset < 0) ? depth : -depth);
+        bool farIsEast = far > edge;
+
+        left = VoxelX(farIsEast ? edge : far);
+        right = VoxelX(farIsEast ? far : edge);
+        north = VoxelZ(originZ + from);
+        south = VoxelZ(originZ + to);
+        material.u0 = art->u0 + du * (farIsEast ? nearEdge : farEdge);
+        material.u1 = art->u0 + du * (farIsEast ? farEdge : nearEdge);
+        material.v0 = art->v0 + dv * (from / cell16 + inset);
+        material.v1 = art->v0 + dv * (to / cell16 - inset);
+    }
+    positions[0][0] = left;  positions[0][1] = height; positions[0][2] = north;
+    positions[1][0] = right; positions[1][1] = height; positions[1][2] = north;
+    positions[2][0] = right; positions[2][1] = height; positions[2][2] = south;
+    positions[3][0] = left;  positions[3][1] = height; positions[3][2] = south;
+    if (!AppendQuad(vertices, capacity, vertexCount, positions, &material, 1.0f, 0.0f))
+        return false;
+    for (int corner = 0; corner < 4; corner++)
+    {
+        if (positions[corner][0] < mesh->bounds.minX) mesh->bounds.minX = positions[corner][0];
+        if (positions[corner][0] > mesh->bounds.maxX) mesh->bounds.maxX = positions[corner][0];
+        if (positions[corner][2] < mesh->bounds.minZ) mesh->bounds.minZ = positions[corner][2];
+        if (positions[corner][2] > mesh->bounds.maxZ) mesh->bounds.maxZ = positions[corner][2];
+    }
+    if (height > mesh->bounds.maxY)
+        mesh->bounds.maxY = height;
+    mesh->topFaceCount++;
+    return true;
+}
+
+static bool AppendGrassEdges(const struct DioramaTerrainChunkInput *input,
+                             struct DioramaTerrainVertex *vertices, uint32_t capacity,
+                             uint32_t *vertexCount, struct DioramaTerrainMesh *mesh)
+{
+    for (int y = DIORAMA_TERRAIN_HALO; y < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; y++)
+        for (int x = DIORAMA_TERRAIN_HALO; x < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; x++)
+        {
+            const struct DioramaTerrainCell *cell = GetCell(input, x, y);
+            int32_t cx = cell->mapX;
+            int32_t cy = cell->mapY;
+
+            if (!IsSoftGrassCell(cell))
+                continue;
+            for (int side = 0; side < 4; side++)
+            {
+                const struct DioramaTerrainCell *ground = GrassEdgeGround(input, cell, side);
+                bool across = side == GRASS_SIDE_NORTH || side == GRASS_SIDE_SOUTH;
+                int points = DIORAMA_VOXELS_PER_CELL / GRASS_EDGE_STEP;
+                /* the edge's points in steps (the cell's edge from its west or north end) */
+                int32_t baseX = (side == GRASS_SIDE_EAST ? cx + 1 : cx) * points;
+                int32_t baseY = (side == GRASS_SIDE_SOUTH ? cy + 1 : cy) * points;
+                float control[DIORAMA_VOXELS_PER_CELL / GRASS_EDGE_STEP + 1];
+                bool startCorner, endCorner, spill;
+                int kind, beforeKind, afterKind;
+                int runFrom = 0;
+                int runOffset = 0;
+
+                if (ground == NULL)
+                    continue;
+                kind = GrassEdgeKind(input, cx, cy, side);
+                spill = kind == 2;
+                beforeKind = GrassEdgeKind(input, cx - (across ? 1 : 0), cy - (across ? 0 : 1), side);
+                afterKind = GrassEdgeKind(input, cx + (across ? 1 : 0), cy + (across ? 0 : 1), side);
+                startCorner = GrassEdgeGround(input, cell, across ? GRASS_SIDE_WEST : GRASS_SIDE_NORTH) != NULL;
+                endCorner = GrassEdgeGround(input, cell, across ? GRASS_SIDE_EAST : GRASS_SIDE_SOUTH) != NULL;
+                for (int k = 0; k <= points; k++)
+                {
+                    int32_t px = baseX + (across ? k : 0);
+                    int32_t py = baseY + (across ? 0 : k);
+
+                    /* an end the edge goes on past (the next cell's same side open) is shared with that cell;
+                     * one it stops at is on the edge */
+                    if (k == 0)
+                        control[k] = beforeKind ? GrassEdgeControl(px, py, (uint32_t)side, spill && beforeKind == 2)
+                                                : 0.0f;
+                    else if (k == points)
+                        control[k] = afterKind ? GrassEdgeControl(px, py, (uint32_t)side, spill && afterKind == 2)
+                                               : 0.0f;
+                    else
+                        control[k] = GrassEdgeControl(px, py, (uint32_t)side, spill);
+                }
+                for (int i = 0; i <= DIORAMA_VOXELS_PER_CELL; i++)
+                {
+                    int offset = 0;
+
+                    if (i < DIORAMA_VOXELS_PER_CELL)
+                    {
+                        float t = i + 0.5f;
+                        int k = i / GRASS_EDGE_STEP;
+                        float o = GrassEdgeEase(control[k], control[k + 1],
+                                                (t - k * GRASS_EDGE_STEP) / GRASS_EDGE_STEP);
+
+                        if (startCorner && -GrassEdgeRound(t) < o)
+                            o = -GrassEdgeRound(t);
+                        if (endCorner && -GrassEdgeRound(DIORAMA_VOXELS_PER_CELL - t) < o)
+                            o = -GrassEdgeRound(DIORAMA_VOXELS_PER_CELL - t);
+                        offset = (int)lroundf(o);
+                    }
+                    if (offset != runOffset || i == DIORAMA_VOXELS_PER_CELL)
+                    {
+                        if (runOffset != 0
+                         && !AppendGrassEdgeRun(cell, &ground->materials[DIORAMA_MATERIAL_FACE_TOP], side,
+                                                runFrom, i, runOffset, vertices, capacity, vertexCount, mesh))
+                            return false;
+                        runFrom = i;
+                        runOffset = offset;
+                    }
+                }
+            }
+        }
+    return true;
+}
+
 static bool AppendPixelQuad(struct DioramaTerrainVertex *vertices, uint32_t capacity,
                             uint32_t *count, const float positions[4][3], float shade,
                             uint32_t color)
@@ -3072,6 +3333,7 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
     }
 
     if (!AppendTreeHulls(input, vertices, vertexCapacity, &vertexCount, mesh)
+     || !AppendGrassEdges(input, vertices, vertexCapacity, &vertexCount, mesh)
      || !AppendPixelPrimitives(input, vertices, vertexCapacity, &vertexCount, mesh))
         return false;
 

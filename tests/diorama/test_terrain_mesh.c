@@ -1506,6 +1506,64 @@ static void TestLargeGroupedTreeUsesAuthoredVoxelModel(void)
     assert(sawBase && sawLitGround);
 }
 
+/* The owner's decision #59 (KNOWN_ISSUES MS-248 C): tall grass's outline beside other flat ground wanders a few
+ * pixels either side of the cells' edge, its outer corners rounded - faces laid just over the ground; the cells,
+ * their heights and everything else unchanged. */
+static void TestTallGrassOutlineIsSoft(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh plain;
+    struct DioramaTerrainMesh soft;
+    uint32_t plainFaces;
+    uint32_t lifted = 0;
+    bool past = false;
+    bool inside = false;
+    uint64_t hash;
+    /* the block: map cells x 2..5, y 2..4; world x 1.5 to 5.5, z -1.5 (north) to -4.5 */
+    const float west = 1.5f, east = 5.5f, north = -1.5f, south = -4.5f, reach = 3.0f / 16.0f + 0.001f;
+
+    InitInput(&input, 3, MB_NORMAL);
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &plain));
+    plainFaces = plain.topFaceCount;
+    for (int y = 2; y <= 4; y++)
+        for (int x = 2; x <= 5; x++)
+        {
+            struct DioramaTerrainCell *cell = &input.cells[(y + 1) * DIORAMA_TERRAIN_INPUT_SIZE + x + 1];
+
+            cell->softGrass = 1;
+            cell->archetype = DIORAMA_ARCHETYPE_GRASS;
+            cell->metatileId = 13;
+        }
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &soft));
+    assert(soft.topFaceCount > plainFaces);
+    assert(soft.bottomFaceCount == plain.bottomFaceCount && soft.sideFaceCount == plain.sideFaceCount);
+    assert(soft.bounds.minY == plain.bounds.minY);
+    for (uint32_t vertex = 0; vertex < soft.vertexCount; vertex++)
+    {
+        const struct DioramaTerrainVertex *v = &sVertices[vertex];
+
+        if (v->y <= 0.0001f)
+            continue;
+        lifted++;
+        assert(v->y < 1.0f / 64.0f);                                   /* just over the ground */
+        assert(v->x >= west - reach && v->x <= east + reach);
+        assert(v->z <= north + reach && v->z >= south - reach);
+        past |= v->x < west - 0.03f || v->x > east + 0.03f || v->z > north + 0.03f || v->z < south - 0.03f;
+        inside |= v->x > west + 0.03f && v->x < east - 0.03f && v->z < north - 0.03f && v->z > south + 0.03f;
+    }
+    assert(lifted > 0 && lifted % 6 == 0);
+    assert(past && inside);                                            /* the grass past its edge, the ground in */
+    hash = soft.geometryHash;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &soft));
+    assert(soft.geometryHash == hash);                                 /* the same outline every time */
+    /* beside water nothing changes: the grass's edge is the shore */
+    for (int i = 0; i < DIORAMA_TERRAIN_INPUT_SIZE * DIORAMA_TERRAIN_INPUT_SIZE; i++)
+        if (!input.cells[i].softGrass)
+            input.cells[i].reflective = 1;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &soft));
+    assert(soft.topFaceCount == plainFaces);
+}
+
 static void TestAuthoredTreeModelBuildsOnceInLocalSpace(void)
 {
     struct DioramaTerrainBounds bounds;
@@ -2057,6 +2115,7 @@ int main(void)
     TestTreeFacesWoundOutward();
     TestTreeLevelsOfDetailByDepth();
     TestLargeGroupedTreeUsesAuthoredVoxelModel();
+    TestTallGrassOutlineIsSoft();
     TestIncompleteLargeTreeFallsBackToFlatGround();
     TestTreeGroundBankReadsGround();
     TestWideGroupedHullCentersItsDepth();

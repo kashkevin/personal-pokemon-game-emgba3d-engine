@@ -693,6 +693,17 @@ const struct DioramaProp *DioramaProps_ForCell(const struct DioramaSceneSnapshot
     return prop;
 }
 
+bool DioramaProps_IsTallGrass(const struct DioramaSceneSnapshot *snapshot, const struct DioramaCellSnapshot *cell)
+{
+    const struct DioramaProp *prop;
+
+    if (snapshot == NULL || cell == NULL)
+        return false;
+    prop = DioramaProps_Find(CellLayout(snapshot, cell), cell->metatileId);
+    return prop != NULL && (prop->kind == DIORAMA_PROP_KIND_LONG_GRASS
+                         || (prop->kind == DIORAMA_PROP_KIND_GRASS && prop->form == DIORAMA_PROP_CARDS));
+}
+
 static const struct DioramaCellSnapshot *GridCell(const struct DioramaSceneSnapshot *snapshot,
                                                   int mapX, int mapY, int *index)
 {

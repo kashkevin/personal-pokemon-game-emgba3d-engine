@@ -2227,6 +2227,7 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
             cell->collision = source->collision;
             cell->rawElevation = source->elevation;
             cell->reflective = MetatileBehavior_IsReflective(source->behavior);
+            cell->softGrass = DioramaProps_IsTallGrass(snapshot, source);
             cell->shape = resolvedCells[gridIndex].shape;
             cell->archetype = resolvedCells[gridIndex].archetype;
             cell->terrainClass = resolvedCells[gridIndex].terrainClass;

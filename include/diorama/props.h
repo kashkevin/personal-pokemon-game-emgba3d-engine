@@ -161,6 +161,9 @@ const struct DioramaProp *DioramaProps_ForCell(const struct DioramaSceneSnapshot
                                                const struct DioramaCellSnapshot *cell);
 /* The prop of a layout's metatile, NULL for none. */
 const struct DioramaProp *DioramaProps_Find(uint16_t layoutId, uint16_t metatileId);
+/* Whether a cell is tall grass - the catalogue's grass and long grass (Routes 119 and 120, Route 113's ash) -
+ * whether or not the detail objects are drawn: its outline is drawn soft (terrain_mesh.c, the owner's decision #59). */
+bool DioramaProps_IsTallGrass(const struct DioramaSceneSnapshot *snapshot, const struct DioramaCellSnapshot *cell);
 /* Whether the rules know a layout id (one of the maps the 3D view shows). */
 bool DioramaProps_KnownLayout(uint16_t layoutId);
 
