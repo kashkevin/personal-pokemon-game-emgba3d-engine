@@ -24,9 +24,11 @@
 #include "pokemon.h"
 #include "pokemon_storage_system.h"
 #include "random.h"
+#include "text.h"
 #include "wild_encounter.h"
 #include "constants/abilities.h"
 #include "constants/berry.h"
+#include "constants/characters.h"
 #include "constants/flags.h"
 #include "constants/items.h"
 #include "constants/layouts.h"
@@ -896,6 +898,69 @@ int NativeSelfTest_Balls(void)
         gBattleMons[WILD].hp = gBattleMons[WILD].maxHP;
         Expect("the shake chance rises with the odds and a throw at 255 catches at once",
                CatchChance(10) < CatchChance(100) && CatchChance(100) < CatchChance(200) && CatchChance(255) == 1.0);
+    }
+    // The Heavy Ball's description (the owner, 2026-11-14, #66: MS-149's odds kept, the bag says how it does on light
+    // Pokemon) and every ball's description inside the bag's description window (item_menu.c WIN_DESCRIPTION: 14
+    // tiles, the text from x 3, three lines of the normal font; the 3D bag wraps its own)
+    {
+        static const u8 sLight[] = _("light");
+        const u8 *heavy = GetItemDescription(ITEM_HEAVY_BALL);
+        bool32 named = FALSE, fit = TRUE;
+        u32 item, balls = 0, widestWidth = 0, widestItem = 0;
+
+        for (i = 0; heavy[i] != EOS && !named; i++)
+        {
+            u32 k;
+
+            for (k = 0; sLight[k] != EOS && heavy[i + k] == sLight[k]; k++)
+                ;
+            named = sLight[k] == EOS;
+        }
+        Expect("the Heavy Ball's description names light Pokemon (it does poorly on them)", named);
+        SetDefaultFontsPointer();
+        for (item = 1; item < ITEMS_COUNT; item++)
+        {
+            const u8 *text;
+            u8 line[64];
+            u32 n = 0, lines = 1;
+
+            if (GetItemPocket(item) != POCKET_POKE_BALLS)
+                continue;
+            balls++;
+            text = GetItemDescription(item);
+            for (i = 0;; i++)
+            {
+                if (text[i] == CHAR_NEWLINE || text[i] == EOS || n == sizeof(line) - 1)
+                {
+                    u32 width;
+
+                    line[n] = EOS;
+                    width = GetStringWidth(FONT_NORMAL, line, 0);
+                    if (width > widestWidth)
+                        widestWidth = width, widestItem = item;
+                    if (width > 14 * 8 - 3)
+                    {
+                        fit = FALSE;
+                        printf("     too wide: item %u, line %u, %u pixels\n", (unsigned)item, (unsigned)lines,
+                               (unsigned)width);
+                    }
+                    n = 0;
+                    if (text[i] != CHAR_NEWLINE)
+                        break;
+                    lines++;
+                    continue;
+                }
+                line[n++] = text[i];
+            }
+            if (lines > 3)
+            {
+                fit = FALSE;
+                printf("     too many lines: item %u, %u\n", (unsigned)item, (unsigned)lines);
+            }
+        }
+        printf("     %u balls' descriptions, the widest line %u of %u pixels (item %u)\n",
+               (unsigned)balls, (unsigned)widestWidth, 14 * 8 - 3, (unsigned)widestItem);
+        Expect("every ball's description fits the bag's description window (three lines, 109 pixels)", fit && balls > 20);
     }
     gBattleTypeFlags = 0;
     free(gBattleStruct);

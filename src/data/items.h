@@ -381,10 +381,21 @@ const struct ItemInfo gItemsInfo[] =
     {
         .name = ITEM_NAME("Heavy Ball"),
         .price = (I_PRICE >= GEN_7) ? 0 : 300,
+#ifdef PORTABLE
+        // the owner's decision (2026-11-14, #66; MS-149): the odds kept, the bag says how it does on light Pokemon
+        // (a catch rate 20 lower under 100 kg; at most 1 in about 64,500 throws on the lightest rare ones)
+        .description = COMPOUND_STRING(
+            "Works well on heavy\n"
+            "Pokémon but poorly\n"
+            "on light ones."),
+#else
+#line 384 // gba-line
         .description = COMPOUND_STRING(
             "A Ball that works\n"
             "better on very\n"
             "heavy Pokémon."),
+#endif
+#line 388 // gba-line
         .pocket = POCKET_POKE_BALLS,
         .type = ITEM_USE_BAG_MENU,
         .battleUsage = EFFECT_ITEM_THROW_BALL,
