@@ -956,6 +956,38 @@ static void CheckLoseText(const char *label, const u8 *text, bool32 trainerB)
     ExpectBreak(what, StringCompare(got, want) == 0);
 }
 
+// The world banner's own texts (multiplayer_world.c ShowNotice: a window 30 tiles wide, two lines of the small
+// font from x 4, MP_WORLD_NOTICE_CHARS at most): every character kept, two lines at most, each line inside the
+// banner. KNOWN_ISSUES M27: the appearance hint in the owner's wording of 2026-11-14 (#68) is 64 characters, the
+// most the banner keeps. The presence refusals are copied from multiplayer_presence.c; a text one character too
+// long, one of three lines and one too wide are the controls (each must be found not to fit).
+#include "multiplayer_world.h"
+
+static void CheckNotice(const char *label, const char *ascii, bool32 fits)
+{
+    u32 lines, widest;
+    bool32 whole;
+    char what[200];
+
+    MultiplayerWorld_NoticeLayout(ascii, &lines, &widest, &whole);
+    printf("  %s: %u line(s), the widest %u of %u pixels, %s\n", label, (unsigned)lines, (unsigned)widest,
+           (unsigned)MultiplayerWorld_NoticeWidth(), whole ? "every character kept" : "cut");
+    snprintf(what, sizeof(what), "the banner text \"%s\" %s", label, fits ? "fits" : "is found not to fit");
+    ExpectBreak(what, (whole && lines <= 2 && widest <= MultiplayerWorld_NoticeWidth()) == fits);
+}
+
+static void CheckNotices(void)
+{
+    SetDefaultFontsPointer();
+    printf("the world banner's own texts (M27)\n");
+    CheckNotice("the appearance hint", MultiplayerAppearance_HintText(), TRUE);
+    CheckNotice("the lost link", "Link to the world was lost.|See the launcher window.", TRUE);
+    CheckNotice("no world", "PLAYERS needs a multiplayer|world from the launcher.", TRUE);
+    CheckNotice("65 characters (control)", "Make your own TRAINER look:|Press START, then PLAYER, then STYLE!", FALSE);
+    CheckNotice("three lines (control)", "one|two|three", FALSE);
+    CheckNotice("too wide (control)", "MMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMMM", FALSE);
+}
+
 int NativeSelfTest_LineBreak(void)
 {
     static const struct { const char *label; const u8 *text; } sTexts[] = {
@@ -983,6 +1015,7 @@ int NativeSelfTest_LineBreak(void)
         CheckLoseText(sTexts[i].label, sTexts[i].text, TRUE);
     }
     gBattleTypeFlags = 0;
+    CheckNotices();
     printf("selftest-line-break: %d checks, %d failed\n", sBreakChecks, sBreakFailures);
     return sBreakFailures ? 1 : 0;
 }

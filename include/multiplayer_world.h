@@ -200,6 +200,14 @@ bool32 MultiplayerWorld_PostCoopRequest(u32 gym);
 // Appearance editor support (multiplayer_appearance.c).
 bool32 MultiplayerWorld_PostAppearanceSaved(void);
 bool32 MultiplayerWorld_ShowLocalNotice(const char *ascii);
+#ifdef PORTABLE
+// The banner's layout of a text (lines, widest line in pixels, every character kept) and a line's room in it: the
+// self-test's check that the game's own banners fit. The appearance hint's text (multiplayer_appearance.c).
+void MultiplayerWorld_NoticeLayout(const char *ascii, u32 *lines, u32 *widest, bool32 *whole);
+u32 MultiplayerWorld_NoticeWidth(void);
+const char *MultiplayerAppearance_HintText(void);
+#endif
+#line 198 // gba-line
 
 // Script specials for the world event object.
 void MultiplayerWorld_TryClaimEvent(void);

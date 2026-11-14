@@ -1326,6 +1326,48 @@ static bool32 ShowNotice(const u8 *ascii)
 #undef tTimer
 #undef tWindow
 
+#ifdef PORTABLE
+// How a banner text lays out, for the self-test's check that the game's own banners fit (--selftest-line-break):
+// its lines, its widest line in the banner's font, and whether ConvertNotice kept every character (MP_WORLD_NOTICE_CHARS
+// at most, two lines at most). A line has the window's width less the text's left margin (ShowNotice).
+void MultiplayerWorld_NoticeLayout(const char *ascii, u32 *lines, u32 *widest, bool32 *whole)
+{
+    u8 text[MP_WORLD_NOTICE_CHARS + 1];
+    u8 line[MP_WORLD_NOTICE_CHARS + 1];
+    u32 i, n = 0;
+
+    ConvertNotice(text, (const u8 *)ascii);
+    *whole = strlen(ascii) <= MP_WORLD_NOTICE_CHARS;
+    *lines = 1;
+    *widest = 0;
+    for (i = 0;; i++)
+    {
+        if (text[i] == CHAR_NEWLINE || text[i] == EOS)
+        {
+            u32 width;
+
+            line[n] = EOS;
+            width = GetStringWidth(FONT_SMALL, line, 0);
+            if (width > *widest)
+                *widest = width;
+            n = 0;
+            if (text[i] == EOS)
+                break;
+            (*lines)++;
+            continue;
+        }
+        if (text[i] == 0x00 && ascii[i] == '|')
+            *whole = FALSE; // a third line ConvertNotice cut
+        line[n++] = text[i];
+    }
+}
+
+u32 MultiplayerWorld_NoticeWidth(void)
+{
+    return 30 * 8 - 4; // the window template's 30 tiles, the text printed from x 4
+}
+#endif
+#line 1028 // gba-line
 // A banner from this ROM itself (hints), shown like a host notice.
 bool32 MultiplayerWorld_ShowLocalNotice(const char *ascii)
 {

@@ -41,8 +41,9 @@ static void CharCustomEditor_Open(void);
 #define HINT_DELAY_FRAMES (60 * 12)
 #ifdef PORTABLE
 // The notice banner's font has no '>' glyph, so the arrows of "START > PLAYER > STYLE" drew as blanks
-// ("START  PLAYER  STYLE", KNOWN_ISSUES M27). PC wording without them; the GBA text is unchanged.
-#define APPEARANCE_HINT "Make your own TRAINER look:|START menu: PLAYER, then STYLE"
+// ("START  PLAYER  STYLE", KNOWN_ISSUES M27). PC wording without them, the owner's (2026-11-14, #68): 64 characters,
+// the banner's most (the self-test --selftest-line-break checks it fits); the GBA text is unchanged.
+#define APPEARANCE_HINT "Make your own TRAINER look:|Press START, then PLAYER, then STYLE"
 #else
 #define APPEARANCE_HINT "Make your own TRAINER look:|START > PLAYER > STYLE"
 #endif
@@ -379,6 +380,13 @@ void MultiplayerAppearance_Tick(bool32 connected)
     }
 }
 
+#ifdef PORTABLE
+const char *MultiplayerAppearance_HintText(void)
+{
+    return APPEARANCE_HINT;
+}
+#endif
+#line 350 // gba-line
 // ---------------------------------------------------------------------------
 // Style editor (PLAYER > STYLE): the field sprite previews every change live.
 
