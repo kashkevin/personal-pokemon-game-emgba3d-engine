@@ -873,12 +873,16 @@ def sootopolis_house():
     side = (80, 0, 96, 32)      # a stretch of plain wall (the corner's is a round window)
     return own_shell(_chairs(piece, [(6, 4), (6, 5), (9, 4), (9, 5)], SOOT_FLOOR) + [
         piece("table", [(112, 64, 144, 96)], 10, leave=SOOT_FLOOR),
-    ] + [piece("plant_%d" % cx, [(cx * 16, 16, cx * 16 + 16, 48)], 28,
-               leave=SOOT_FLOOR + HOUSE_WALL, card=True) for cx in (2, 3, 4)] + [
+        # its three plants (cells 2-4, 1) are the house kit's, reused (gen_voxel_buildings.reuse_pieces):
+        # since the kit's plant takes its whole silhouette, cards of their own here kept only stray pixels
+    ] + [
         piece("stove", [(112, 14, 128, 40)], 20, back=32, leave=HOUSE_WALL + SOOT_FLOOR),
         piece("cabinet", [(128, 14, 144, 40)], 20, back=32, leave=HOUSE_WALL + SOOT_FLOOR),
         piece("sink", [(144, 14, 176, 40)], 20, back=32, leave=HOUSE_WALL + SOOT_FLOOR),
-        piece("wall", [(0, 0, 176, 32)], 24, fill=16, side=side),
+        # behind the plants the doorway to the stairs down (x 45-67, rows 9-32: its yellow frame, the
+        # dark well; the plants block it until the layout with the stairs unblocked): what they hide of
+        # it runs on down from what shows above them, a doorway behind them and not loose yellow bits
+        piece("wall", [(0, 0, 176, 32)], 24, fill=16, side=side, fill_down=[(45, 9, 68, 32)]),
         piece("side_w", [], 24, side=side, walls=[((0, 128), (0, 32))]),
         piece("side_e", [], 24, side=side, walls=[((176, 32), (176, 128))]),
     ])

@@ -592,7 +592,7 @@ WALL_COLOURS = ("f6b473", "de7b31", "ffe6b4")   # the Center's orange wall
 
 def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=False,
           back=None, card=False, top=None, foot=None, walls=(), cells=(), against=None,
-          claim=(), under=True):
+          claim=(), under=True, fill_down=()):
     """`back`: the Z its top runs back to, where the cartridge's collision
     says it ends (or the wall it stands against); `against`: that wall's Z,
     where a top drawn deeper than the room in front of it stops, its back
@@ -601,11 +601,14 @@ def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=Fal
     repeat; `card`: leaves, not a box; `foot`: the row a wall with a doorway
     stands on; `walls`: the side walls it carries, ((x, z), (x, z)[, height])
     - facing left of a->b - dressed with `side`; `under` False: the floor its
-    drawing hides is bare, no mark either side of it carried under it."""
+    drawing hides is bare, no mark either side of it carried under it;
+    `fill_down`: a wall's rectangles where what stands before it is filled from
+    the wall's own pixels above in the same column (gen_voxel_buildings.hidden_source)."""
     return {"name": name, "shape": shape, "height": height, "base": base,
             "fill": fill, "leave": leave, "side": side, "solid": solid,
             "back": back, "card": card, "top": top, "foot": foot, "walls": walls,
-            "cells": cells, "against": against, "claim": claim, "under": under}
+            "cells": cells, "against": against, "claim": claim, "under": under,
+            "fill_down": fill_down}
 
 
 def own_shell(pieces):
@@ -934,14 +937,23 @@ GENERIC_RUG = ("ffcd8b", "f6f6a4")
 GENERIC_TABLE = ("fff683", "bdac52")
 
 
+# The potted plant's silhouette, row by row from its crown's top: (row, first column, last column + 1),
+# read off its drawing on the plain floor (LAYOUT_HOUSE1's plant at 144,113).
+POTTED_PLANT_ROWS = [(0, 7, 9), (1, 6, 10), (2, 3, 13), (3, 2, 14), (4, 2, 14), (5, 1, 15), (6, 0, 16),
+                     (7, 0, 16), (8, 1, 15), (9, 0, 16), (10, 0, 16), (11, 1, 15), (12, 2, 14), (13, 2, 14),
+                     (14, 3, 13), (15, 5, 11), (16, 6, 10), (17, 6, 10), (18, 4, 12), (19, 3, 13)] + \
+                    [(row, 2, 14) for row in range(20, 29)] + [(29, 3, 13), (30, 4, 12)]
+
+
 def potted_plant(x, y):
     """The potted plant's outline, its crown's top-left at (x, y): the
     lines between the planks are drawn in the pot's own outline colour, so
-    the shape follows the crown, the stem and the pot instead of a box."""
-    return [(x, y, x + 16, y + 13), (x + 3, y + 13, x + 13, y + 14),
-            (x + 5, y + 14, x + 11, y + 16), (x + 6, y + 16, x + 10, y + 19),
-            (x + 3, y + 19, x + 13, y + 23), (x + 2, y + 23, x + 14, y + 30),
-            (x + 4, y + 30, x + 5, y + 31), (x + 11, y + 30, x + 12, y + 31)]
+    the shape follows the crown, the stem and the pot instead of a box -
+    row by row, its whole silhouette (the 3D object audit of 2026-11-14:
+    a shape a pixel short of the crown's lowest outline row, the pot's rim
+    corners, its sides and its bottom row left those outline pixels on the
+    floor beside the plant, dark dashes in some twenty-five houses)."""
+    return [(x + x0, y + row, x + x1, y + row + 1) for (row, x0, x1) in POTTED_PLANT_ROWS]
 
 
 def house1():

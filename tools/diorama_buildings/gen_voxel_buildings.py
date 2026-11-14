@@ -378,6 +378,29 @@ def kit_specs(spec):
     return out
 
 
+def hidden_source(owner, walls, x, y, period, down=()):
+    """Where a wall's pixel (x, y) that a piece before it hides is drawn from: the wall's own
+    pixels `period` columns away, either side - from any wall's, this piece's or the other
+    half's, as a row's every panel may be hidden - so the wall behind a bookcase is a wall and
+    not a hole in the shape of one. In a `down` rectangle (a doorway's frame and well behind the
+    plants that block it) the nearest of the wall's own pixels above it in its column, inside the
+    rectangle: the frame's sides and the dark well run on down behind what stands before them,
+    where a pixel 16 columns on was the frame's yellow (the object audit of 2026-11-14). None:
+    no pixel of a wall to draw it from."""
+    W = len(owner[0])
+    if down and _inside(down, x, y):
+        for yy in range(y - 1, -1, -1):
+            if not _inside(down, x, yy):
+                break
+            if owner[yy][x] in walls:
+                return (x, yy)
+    for d in range(period, W, period):
+        src = next(((xx, y) for xx in (x - d, x + d) if 0 <= xx < W and owner[y][xx] in walls), None)
+        if src:
+            return src
+    return None
+
+
 def _inside(shape, x, y):
     """Is pixel (x, y) in a piece's shape: rectangles (x0, y0, x1, y1),
     ellipses ("ellipse", cx, cy, rx, ry) and polygons (a list of points), any
@@ -772,14 +795,9 @@ def interior_specs(spec):
                     o = owner[y][x]
                     if o is None or o >= k or not _inside(pc["shape"], x, y):
                         continue
-                    for d in range(period, W, period):
-                        # from any wall's own pixel, this piece's or the
-                        # other half's: a row's every panel may be hidden
-                        src = next(((xx, y) for xx in (x - d, x + d)
-                                    if 0 <= xx < W and owner[y][xx] in walls), None)
-                        if src:
-                            fill[(x, y)] = fpx[src]
-                            break
+                    src = hidden_source(owner, walls, x, y, period, pc.get("fill_down", ()))
+                    if src:
+                        fill[(x, y)] = fpx[src]
         if not mine and not pc.get("walls"):
             raise SystemExit("%s: piece %s claims no pixel" % (spec["name"], pc["name"]))
         drawn.append((mine, fill))
