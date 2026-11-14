@@ -378,6 +378,11 @@ def kit_specs(spec):
     return out
 
 
+# The owner of a pixel drawn by a wall another room modelled, standing here as it is
+# (place_reused): no piece of this room's, but the room's wall plaster all the same.
+LENT_WALL = -2
+
+
 def hidden_source(owner, walls, x, y, period, down=()):
     """Where a wall's pixel (x, y) that a piece before it hides is drawn from: the wall's own
     pixels `period` columns away, either side - from any wall's, this piece's or the other
@@ -396,6 +401,16 @@ def hidden_source(owner, walls, x, y, period, down=()):
                 return (x, yy)
     for d in range(period, W, period):
         src = next(((xx, y) for xx in (x - d, x + d) if 0 <= xx < W and owner[y][xx] in walls), None)
+        if src:
+            return src
+    # none of the room's own walls shows on the row: a wall another room lends it
+    # (place_reused, LENT_WALL), its own drawn plaster the same panel along. Lavaridge's
+    # Center stands the other Centers' back wall east of its door, and west of it the last
+    # two columns of every panel were hidden all along the row (its plants, the counter,
+    # the machines): unfilled, they stood 2 pixels back, a black slit at every panel's edge
+    for d in range(period, W, period):
+        src = next(((xx, y) for xx in (x - d, x + d) if 0 <= xx < W and owner[y][xx] == LENT_WALL),
+                   None)
         if src:
             return src
     return None
@@ -600,10 +615,11 @@ def register_piece(piece_spec, layout, art, hidden=(), loose=False, own=None):
 
 
 def place_reused(layout, ground):
-    """Stand the known furniture in `layout`; returns the pixels it draws and
-    the cells it covers. `ground` None: a room nobody modelled, whose every
-    other pixel the placements lay flat as ground patches."""
-    pixels, cells = set(), set()
+    """Stand the known furniture in `layout`; returns the pixels it draws, the
+    cells it covers and, of those pixels, a wall's (LENT_WALL). `ground` None: a
+    room nobody modelled, whose every other pixel the placements lay flat as
+    ground patches."""
+    pixels, cells, walls = set(), set(), set()
     for p, x, y, pts, exact in reuse_pieces(layout):
         if exact:
             p["spec"].setdefault("reused_at", []).append((layout.id, x, y, ground))
@@ -614,10 +630,12 @@ def place_reused(layout, ground):
             p["spec"].setdefault("bare_at", []).append((layout.id, x, y))
             p["spec"]["own"] = p["pixels"]
         pixels |= pts
+        if p["spec"].get("wall"):
+            walls |= pts
         w, h = p["size"]
         cells |= {(x + i, y + j) for j in range(h) for i in range(w)}
         print("  reuse: %s stands in %s at %d,%d" % (p["spec"]["name"], layout.id, x, y))
-    return pixels, cells
+    return pixels, cells, walls
 
 
 def reuse_everywhere():
@@ -718,9 +736,9 @@ def interior_specs(spec):
     owner = [[None] * W for _ in range(H)]
     # the furniture an earlier room has modelled, standing here as it is:
     # its pixels are no piece's of this room's
-    reused, reused_cells = place_reused(layout, room["ground"][0])
+    reused, reused_cells, lent_walls = place_reused(layout, room["ground"][0])
     for (x, y) in reused:
-        owner[y][x] = -1
+        owner[y][x] = LENT_WALL if (x, y) in lent_walls else -1
     hexes = None    # each pixel's colour as `leave` names it, read once a room
     for k, pc in enumerate(pieces):
         inside = _inside_grid(pc["shape"], W, H)
@@ -1012,7 +1030,8 @@ def interior_specs(spec):
                     "rect": (x0, y0, w, h), "ground": room["ground"], "art": art,
                     "parts": (lambda ps: (lambda: ps))(parts),
                     "exact": [(0, 0, w * 16, h * 16)], "interior": spec["name"],
-                    "reuse_in": room.get("reuse_in"), "under": room.get("under")})
+                    "reuse_in": room.get("reuse_in"), "under": room.get("under"),
+                    "card": bool(pc.get("card")), "wall": bool(pc.get("fill"))})
         # `alone`: a room's own shell - its walls, a doorway's recess - which
         # another room does not repeat by having the same floor along an edge
         if not pc.get("alone"):
@@ -1475,6 +1494,15 @@ def anchored_at(path, blocks, lw, lh, w, h, template, core):
     return sorted(places, key=lambda p: (p[1], p[0]))
 
 
+def placement_ground(spec, ground_metatile):
+    """The floor laid under a room's piece where it stands: the floor the room names (its first
+    ground), or with "under": "own" each cell's own drawing - where the piece's floor decal leaves a
+    hairline at a texel's edge, the same colours show through. Not under a card (a plant, a sign, a
+    fence): its cells' drawing is the card's own, and it lay flat on the floor under it, seen past it
+    from any camera steeper than the drawing's 45 degrees (the object audit of 2026-11-14)."""
+    return OWN_GROUND if spec.get("under") == "own" and not spec.get("card") else ground_metatile
+
+
 def find_placements(model, layouts_json):
     """Every place in Hoenn the building stands, with the ground around it.
 
@@ -1555,10 +1583,7 @@ def find_placements(model, layouts_json):
                     continue
                 odd = [(i, j) for j in range(h) for i in range(w)
                        if (blocks[(py + j) * lw + px + i] & 0x3FF) != template[j * w + i]]
-                # under the piece the floor the room names (its first ground), or with
-                # "under": "own" each cell's own drawing: where the piece's floor decal
-                # leaves a hairline at a texel's edge, the same colours show through
-                under = OWN_GROUND if model.spec.get("under") == "own" else model.ground_metatile
+                under = placement_ground(model.spec, model.ground_metatile)
                 found.append((index + 1, px, py, under, entry["id"], odd))
                 continue
             ring = {}
