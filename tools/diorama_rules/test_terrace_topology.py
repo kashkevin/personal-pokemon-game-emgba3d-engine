@@ -1347,7 +1347,7 @@ class TerraceTopologyTests(unittest.TestCase):
                  in parse_behaviors(ROOT / "include/constants/metatile_behaviors.h").items()}
         lid = "LAYOUT_SAFARI_ZONE_SOUTH"
         self.assertEqual(set(HAND_LEVELS), {lid, "LAYOUT_FORTREE_CITY", "LAYOUT_BATTLE_FRONTIER_OUTSIDE_EAST",
-                                            "LAYOUT_NAVEL_ROCK_EXTERIOR"})
+                                            "LAYOUT_NAVEL_ROCK_EXTERIOR", "LAYOUT_ROUTE119"})
         layout = next(row for row in layouts if row["id"] == lid)
         width = layout["width"]
         cells = _load_cells(ROOT, [layout], tilesets, names)[0][lid]

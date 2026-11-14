@@ -488,7 +488,9 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         # KNOWN_ISSUES MS-153: Route 119's muddy slope (6,54-55) climbs to a row (5-8,53) the GBA
         # draws on the plateau, which lay a level under it, a step between them, the slope flat.
         # The row stands on the plateau's level (terrace_topology.slope_tops), the slope a ramp,
-        # the rock beside it on its foot as before (not a tile over the plateau).
+        # the rock beside it on its foot as before (not a tile over the plateau). The lawn strip north
+        # of the row (5-9, 52) climbs from the plateau's level to the grass bank over it (MS-247's
+        # bank a level up; a tile's step down from the bank before - compile_rules HAND_LEVELS).
         layout = next(row for row in self.data["layouts"] if row["symbol"] == "LAYOUT_ROUTE119")
         width = layout["width"]
         records = {record["cellOffset"]: record for record in layout["terrainRecords"]
@@ -499,7 +501,7 @@ class DioramaRuleCompilerTests(unittest.TestCase):
             return record["shape"], record["groundQ16"], record["topQ16"]
 
         self.assertEqual([at(6, 52), at(6, 53), at(6, 54), at(6, 55), at(6, 56)],
-                         [("flat", 0, 0), ("flat", 0, 0), ("stairs", -8, 0), ("stairs", -16, -8),
+                         [("stairs", 0, 16), ("flat", 0, 0), ("stairs", -8, 0), ("stairs", -16, -8),
                           ("flat", -16, -16)])
         self.assertEqual({at(x, 53) for x in range(5, 9)}, {("flat", 0, 0)})
         self.assertEqual([at(7, 54), at(8, 54), at(7, 55)], [("cliff", -16, 0)] * 3)
@@ -669,6 +671,29 @@ class DioramaRuleCompilerTests(unittest.TestCase):
             self.assertEqual(at(x, y), ("cliff", 0, 16), (x, y))
         for x, y in ((5, 7), (10, 3), (15, 8)):                                            # the rim over the sand
             self.assertEqual(at(x, y), ("cliff", 16, 32), (x, y))
+
+    def test_repository_route119s_bank_meets_what_the_game_walks_onto_it(self):
+        # KNOWN_ISSUES MS-247's grass bank on Route 119 (a level over the rock plateau) took the cells of its own
+        # elevation alone: the Weather Institute's door, its doorstep and the cells before it, with the building's
+        # middle columns, stayed a level down (the player in a hole before the door); so did the lawn strips the game
+        # walks between the bank and lower grass, a tile's step each. The institute stands whole on the bank; the
+        # strips climb to it (compile_rules HAND_LEVELS).
+        row = next(row for row in self.data["layouts"] if row["symbol"] == "LAYOUT_ROUTE119")
+        records = {record["cellOffset"]: record for record in row["terrainRecords"] if record["mapGroup"] == 0xFF}
+
+        def at(x, y):
+            record = records[y * row["width"] + x]
+            return record["shape"], record["groundQ16"], record["topQ16"]
+
+        for x, y in ((6, 32), (6, 33), (5, 33), (7, 33), (6, 34), (6, 30), (5, 29), (7, 31), (4, 30), (8, 40)):
+            self.assertEqual(at(x, y), ("flat", 16, 16), (x, y))                  # the institute, the bank
+        for x in range(5, 10):
+            self.assertEqual(at(x, 52), ("stairs", 0, 16), x)                     # the strip south of the bank
+        self.assertEqual([at(7, 51), at(7, 53)], [("flat", 16, 16), ("flat", 0, 0)])
+        for y in (33, 34):
+            self.assertEqual([at(22, y), at(23, y), at(24, y)],                   # the bridge's east end
+                             [("flat", 16, 16), ("stairs", 0, 16), ("flat", 0, 0)])
+        self.assertEqual(records[33 * row["width"] + 23]["archetype"], "stairs-w")
 
     def test_repository_fortree_city_tree_houses_stand_a_level_up(self):
         # Fortree City (the 3D sweep of 2026-11-09, MS-222's kind): its six tree houses, their porches and the plank

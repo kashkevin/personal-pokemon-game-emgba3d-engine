@@ -1625,6 +1625,19 @@ HAND_LEVELS: dict[str, dict] = {
     # (5-15, 3-12) the sand, the rock and the rim stand a level over the pier, the stairs climbing to them; the five
     # pieces stay the faces the solver makes of scenery (course_ridges), their tops on the sand's level. A first try
     # (2026-11-13) laid those pieces with the rest of the rock: they stood as a block a tile high and flat squares.
+    # Route 119's grass bank (MOUNTAIN_LEVELS' "more_tops", a level over the rock plateau, KNOWN_ISSUES MS-247) took
+    # the cells of the bank's own elevation (4) alone, so two places on it stayed on the plateau's level: the Weather
+    # Institute's door, its doorstep (elevation 3) and the cells before it (elevation 0, the game's any level), with
+    # the building's middle columns, which took the door's level - the player in a hole a tile deep before the door,
+    # the building's front split - the strip of grass of elevation 0 at (5-9, 52) between the bank's south edge and
+    # the plateau's grass, which the GBA draws as one lawn - a step a tile down from the bank - and the grass of
+    # elevation 0 at (23, 33-34) between the east end of the bridge over the river (it rose with the bank) and the
+    # ground east of it. The institute's front stands on the bank; the strips climb from the lower grass to the bank.
+    "LAYOUT_ROUTE119": {
+        "banks": (((5, 28, 7, 32), 16),),
+        "floors": (((5, 32, 7, 34), 16),),
+        "slopes": (((5, 52, 9, 52), "n", 0, 16), ((23, 33, 23, 34), "w", 0, 16)),
+    },
     "LAYOUT_NAVEL_ROCK_EXTERIOR": {
         "floors": (((5, 3, 15, 12), 16),),
         "banks": (((5, 3, 15, 6), 16), ((5, 7, 6, 8), 16), ((8, 7, 15, 8), 16), ((5, 9, 6, 9), 16),
@@ -2337,13 +2350,16 @@ def compile_data(root: Path) -> dict:
                                        **hand_floors(cells[layout_id], ramp_width, ramp.get("floors", ())),
                                        **hand_slopes(ramp_width, ramp.get("slopes", ()))}
     for layout_id, levels in HAND_LEVELS.items():
-        # Levels given by hand inside a map (HAND_LEVELS; its decks are laid last, below).
+        # Levels given by hand inside a map (HAND_LEVELS; its decks are laid last, below). Its ramps are marked
+        # ("hand"): rock beside one rises from the ramp's ground, not to its top (a lawn strip climbing to Route 119's
+        # bank stood the rock two cells south of it a tile over the plateau, the rock MS-153 laid on its foot).
         level_width = layouts_by_id[layout_id]["width"]
         terrace_topology[layout_id] = {**terrace_topology[layout_id],
                                        **hand_banks(cells[layout_id], level_width, levels.get("banks", ())),
                                        **hand_floors(cells[layout_id], level_width, levels.get("floors", ())),
                                        **hand_ridges(cells[layout_id], level_width, levels.get("ridges", ())),
-                                       **hand_slopes(level_width, levels.get("slopes", ()))}
+                                       **{offset: {**entry, "hand": True} for offset, entry
+                                          in hand_slopes(level_width, levels.get("slopes", ())).items()}}
 
     source = load_json(rules_root / "defaults.json")
     _unknown(source, {"schemaVersion", "kind", "default", "semanticPools", "profiles",
@@ -2645,7 +2661,7 @@ def compile_data(root: Path) -> dict:
                 # (the Safari Zone's mountain, Route 120's cliff).
                 solved = terrace_topology[layout["id"]]
                 courses = {offset: entry["topQ16"] for offset, entry in solved.items()
-                           if entry.get("solid") or entry.get("profile", "none") != "none"}
+                           if entry.get("solid") or (entry.get("profile", "none") != "none" and not entry.get("hand"))}
                 # a mountain's walkable art is no band's (the player walks on it): the rock meets it where it is
                 # drawn, its top (_mountain_masses), else a tile over its ground (the renderer's rock of no height)
                 walked = {offset: solved[offset].get("topQ16", solved[offset]["groundQ16"] + 16)
