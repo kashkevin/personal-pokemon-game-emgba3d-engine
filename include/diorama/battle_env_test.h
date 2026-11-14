@@ -69,6 +69,8 @@
  *                            v<move id> first move, w<n> every IV n, e one experience point
  *                            short of the next level)
  *   PKMN_TEST_FOE            flags for the foes wild/wild2/legendary make: flags,flags
+ *   PKMN_TEST_FOE_PARTY      trainer:'s opponent party instead of the trainer's own: species:level[:flags],...
+ *                            (the party's flags; V<moves> its moveset, a<n> its ability slot)
  *   PKMN_TEST_BAG            items added to the bag: item:count,... (a Mega Ring...)
  *   PKMN_TEST_NAME           the player's name (A-Z a-z 0-9), as the battle starts or saved
  *   PKMN_TEST_KEYS           keys pressed once the action menu is up: frame:KEY,...

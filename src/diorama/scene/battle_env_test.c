@@ -151,6 +151,7 @@ static struct
     /* The sprite tests' additions (battle sprites, platform/battle_sprites.h): the party, the
      * foes' look, bag items, keys pressed at the action menu, a series of captures. */
     char party[256], foe[128], bag[128], keys[256];
+    char foeParty[256]; /* PKMN_TEST_FOE_PARTY: a trainer battle's opponent party in place of the trainer's own */
     int keyFrames;            /* frames since the action menu was first up (FilterKeys) */
     int keysLast;             /* the last PKMN_TEST_KEYS frame: PKMN_TEST_FIGHT takes over after it */
     int seriesEvery, seriesCount, seriesDone;
@@ -552,6 +553,9 @@ static void Init(void)
     value = SDL_getenv("PKMN_TEST_FOE");
     if (value != NULL)
         SDL_strlcpy(s.foe, value, sizeof(s.foe));
+    value = SDL_getenv("PKMN_TEST_FOE_PARTY");
+    if (value != NULL)
+        SDL_strlcpy(s.foeParty, value, sizeof(s.foeParty));
     value = SDL_getenv("PKMN_TEST_BAG");
     if (value != NULL)
         SDL_strlcpy(s.bag, value, sizeof(s.bag));
@@ -1564,6 +1568,41 @@ static void MaybeGiveMegaStone(struct Pokemon *party)
     TestLog("Battle env test: no Pokemon of the opponent's can Mega Evolve by an item");
 }
 
+/* PKMN_TEST_FOE_PARTY="species:level[:flags],...": trainer:'s opponent party in place of the trainer's own (in memory;
+ * flags as CreateTestMon's: V<moves> its moveset, a<n> its ability slot) - the Parting Shot check's Magic Coat and Magic
+ * Bounce users with a second Pokemon to switch to. Each foe logged with its ability and moves. */
+static void ReplaceFoeParty(struct Pokemon *party)
+{
+    const char *p = s.foeParty;
+    int count = 0;
+
+    if (p[0] == '\0')
+        return;
+    for (int i = 0; i < PARTY_SIZE; i++)
+        ZeroMonData(&party[i]);
+    while (*p != '\0' && count < PARTY_SIZE)
+    {
+        int species = 0, level = 0, used = 0;
+        const char *flags = NULL;
+
+        if (sscanf(p, "%d:%d%n", &species, &level, &used) < 2)
+            break;
+        p += used;
+        if (*p == ':')
+            flags = ++p;
+        CreateTestMon(&party[count], species, level, flags);
+        TestLog("Battle env test: foe %d species %d level %d ability %d moves %d %d %d %d", count, species, level,
+                (int)GetMonAbility(&party[count]), (int)GetMonData(&party[count], MON_DATA_MOVE1),
+                (int)GetMonData(&party[count], MON_DATA_MOVE2), (int)GetMonData(&party[count], MON_DATA_MOVE3),
+                (int)GetMonData(&party[count], MON_DATA_MOVE4));
+        count++;
+        while (*p != '\0' && *p != ',')
+            p++;
+        if (*p == ',')
+            p++;
+    }
+}
+
 static void StartTrainer(int a, int b, bool doubles)
 {
     /* As a trainer's script does (lockall): the field stands still through the transition,
@@ -1575,6 +1614,7 @@ static void StartTrainer(int a, int b, bool doubles)
     TRAINER_BATTLE_PARAM.opponentA = a;
     TRAINER_BATTLE_PARAM.opponentB = 0xFFFF;
     CreateNPCTrainerPartyFromTrainer(gParties[B_TRAINER_OPPONENT_A], GetTrainerStructFromId(a));
+    ReplaceFoeParty(gParties[B_TRAINER_OPPONENT_A]);
     MaybeGiveMegaStone(gParties[B_TRAINER_OPPONENT_A]);
     if (doubles || b > 0)
         gBattleTypeFlags |= BATTLE_TYPE_DOUBLE;

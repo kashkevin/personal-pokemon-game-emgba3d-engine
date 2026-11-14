@@ -4774,6 +4774,20 @@ static enum MoveEndResult MoveEndEmergencyExit(struct BattleCalcValues *cv)
     return result;
 }
 
+#ifdef PORTABLE
+// The owner's decision (2026-11-14, #63): Parting Shot under the Gen 6 rule as Pokemon Showdown has it - its user
+// switches out once the move reached its target, whether or not the drops took (stats at their lowest, Hyper Cutter);
+// not when it missed or was blocked (Soundproof, Protect: the target marked failed) or bounced back (Magic Coat, Magic
+// Bounce: the bounce marks the target failed; the Pokemon that reflected it switches through the reflected move). The
+// GBA build keeps upstream's pre-Gen 7 rule, a switch whenever the user can (docs/gba-test-expected-failures.md 27-29).
+static bool32 PartingShotReachedTarget(enum BattlerId battlerDef)
+{
+    return !(gBattleStruct->moveResultFlags[battlerDef]
+             & (MOVE_RESULT_MISSED | MOVE_RESULT_FAILED | MOVE_RESULT_DOESNT_AFFECT_FOE | MOVE_RESULT_PROTECTED
+                | MOVE_RESULT_NOT_PRESENT));
+}
+#endif
+#line 4756 // gba-line
 static bool32 CanPartingShotTrigger(enum BattlerId battlerAtk)
 {
     if (GetConfig(B_PARTING_SHOT_SWITCH) < GEN_7 && CanBattlerSwitch(battlerAtk))
@@ -4811,7 +4825,14 @@ static enum MoveEndResult MoveEndHitEscape(struct BattleCalcValues *cv)
         }
         break;
     case EFFECT_PARTING_SHOT:
+#ifdef PORTABLE
+        if (CanPartingShotTrigger(cv->battlerAtk)
+         && (GetConfig(B_PARTING_SHOT_SWITCH) >= GEN_7 || PartingShotReachedTarget(cv->battlerDef)))
+#else
+#line 4793 // gba-line
         if (CanPartingShotTrigger(cv->battlerAtk))
+#endif
+#line 4794 // gba-line
         {
             for (enum BattlerId battler = 0; battler < gBattlersCount; battler++)
                 gBattleMons[battler].volatiles.tryEjectPack = FALSE;
