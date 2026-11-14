@@ -1293,6 +1293,46 @@ def trick_house_corridor():
     ])
 
 
+# ── Lanette's house (Route 114) ────────────────────────────────────────────
+#
+# 11 x 8 cells, drawn with Birch's lab's tiles: the lab's bookcases, boxes and book stacks, its computer
+# on its desk, a red book, its machines and the long desk under one of them stand here as the lab's,
+# found by their tiles or their pixels (gen_voxel_buildings.reuse_pieces). Nobody had modelled the room
+# itself until the object audit of 2026-11-14: its back wall lay on the floor, and three machines stood a
+# table's height over one-cell tables that lay flat under them - the two on the west edge seen past the
+# floor's edge from the player's camera (the audit's class 5). From the top of the drawing:
+#
+#     rows  0- 32  the back wall: its top band rows 0-4, its face to row 25, a skirting to row 31
+#     rows  8- 40  the lab's bookcases at x 0-64 and 144-176; between them two desks, their tops rows
+#                  20-31 and fronts rows 31-39: x 80-112 with a white box and a ball on it (x 82-94),
+#                  papers and the lab's red book, and the lab's computer's (x 112-144)
+#     rows 49- 80  two of the lab's machines side by side, x 96-128, each on a one-cell table
+#     rows 65- 96  and 97-128: one each on the west edge, x 0-16
+#     rows 82- 96  and 114-128: cardboard boxes, x 112-127 and 16-31, 7 rows of front
+#
+# The tables as the lab's desks under its machines, 8 rows, their tops run back under the machines.
+
+LANETTE_WALL = ("d5d5b4",)          # the wall's face round what stands against it
+LANETTE_SIDE = (78, 0, 80, 32)      # the two columns of wall bare from its top to its foot
+
+
+def lanettes_house():
+    facet, own_shell, piece = _helpers()
+    import voxel_building_specs as v
+    sh = v.LAB_SHADOW
+    tables = [piece("table_%d_%d" % (x0 // 16, y // 16), [(x0, y, x0 + 16, y + 16)], 8, leave=sh, back=y)
+              for (x0, y) in ((0, 80), (0, 112), (96, 64), (112, 64))]
+    return own_shell(tables + [
+        piece("box_e", [(112, 82, 127, 96)], 7, leave=sh, solid=True),
+        piece("box_w", [(16, 114, 31, 128)], 7, leave=sh, solid=True),
+        piece("ball_box", [(82, 17, 94, 31)], 8, base=8, leave=LANETTE_WALL, solid=True),
+        piece("desk", [(80, 20, 112, 40)], 8, leave=sh + LANETTE_WALL, against=32),
+        piece("wall", [(0, 0, 176, 32)], 32, fill=16, foot=32, side=LANETTE_SIDE),
+        piece("side_w", [], 32, side=LANETTE_SIDE, walls=[((0, 128), (0, 32))]),
+        piece("side_e", [], 32, side=LANETTE_SIDE, walls=[((176, 32), (176, 128))]),
+    ])
+
+
 # ── Lilycove's Contest Lobby ───────────────────────────────────────────────
 #
 # 31 x 12 cells, no model until the object audit of 2026-11-14. The back wall (rows 0-32: a red
@@ -2064,6 +2104,11 @@ def furnished_room_specs():
             "name": "trainer_fan_club",
             "interior": {"layout": "LAYOUT_LILYCOVE_CITY_POKEMON_TRAINER_FAN_CLUB", "ground": [0x223],
                          "under": "own", "reuse_in": frozenset(), "pieces": trainer_fan_club()},
+        },
+        {
+            "name": "lanettes_house",
+            "interior": {"layout": "LAYOUT_ROUTE114_LANETTES_HOUSE", "ground": [0x202], "under": "own",
+                         "reuse_in": frozenset(), "pieces": lanettes_house()},
         },
         {
             "name": "shipyard_1f",

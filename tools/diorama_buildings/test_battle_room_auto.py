@@ -157,6 +157,19 @@ class FloorShadeTests(unittest.TestCase):
         self.assertIn((3, 15), self.cells(pc))
         self.assertEqual(pc["height"], 20)
 
+    def test_a_stool_behind_a_table_stays_on_the_floor(self):
+        # the object audit of 2026-11-14: the Space Center 1F's east plan tables took the two stools
+        # behind them (10, 6 and 13, 6) as their drawing, and stood them on their tops (APART)
+        things = self.things("LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_1F")
+        tables = things["thing_10_7"]
+        self.assertEqual(self.cells(tables), [(x, y) for x in range(10, 14) for y in (7, 8)])
+        self.assertEqual(self.cells(things["thing_2_5"]), [(x, y) for x in range(2, 6) for y in (5, 6)])
+        self.assertEqual(tables["height"], things["thing_2_5"]["height"])
+        stools = {(10, 6), (13, 6)}
+        self.assertFalse(stools & {cell for pc in things.values() for cell in self.cells(pc)})
+        # the machines on the desks north of the stools still take their drawing running on
+        self.assertIn((10, 4), self.cells(things["thing_10_5"]))
+
 
 class FactoryHallTests(unittest.TestCase):
     """KNOWN_ISSUES MS-227: the Battle Factory hall's side walls repeat the stretch of the back wall

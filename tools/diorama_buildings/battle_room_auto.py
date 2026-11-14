@@ -91,6 +91,15 @@ LEVEL_WALL = {
     "LAYOUT_SOOTOPOLIS_CITY_GYM_1F": 32,
 }
 
+# Floor cells north of a thing whose drawing stands apart from it - its own object on the floor,
+# not the thing's drawing running on - left to the floor (thing_pieces takes a thing's north cell
+# that differs from the floor as its drawing laid back). The Space Center 1F's two stools behind
+# its east plan tables: with the tables, they stood on the tables' tops (the object audit of
+# 2026-11-14, class 2); on the floor, as the room's other stools.
+APART = {
+    "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_1F": {(10, 6), (13, 6)},
+}
+
 # Stairwells modelled by hand, by their metatiles (the secondary tileset's): the Facility tileset's
 # flight up, three cells wide on a back wall's two rows - Mt. Pyre's floors 1F-5F, Team Aqua's
 # hideout B1F and B2F, the Space Center 1F. The reader stood its outer columns (the posts and the
@@ -250,6 +259,7 @@ def analyse(layout_id, taken=(), drop=()):
     floor = [[(not blocked(x, y) or level[y][x]) and not void[y][x] for x in range(W)]
              for y in range(H)]
     stand = STAND.get(layout_id, set())
+    apart = APART.get(layout_id, set())
     max_wall = min(MAX_WALL, LEVEL_WALL.get(layout_id, MAX_WALL))
     solid = [[blocked(x, y) and not void[y][x] and not level[y][x] and (x, y) not in taken
               and (not changes(meta(x, y)) or (x, y) in stand) for x in range(W)] for y in range(H)]
@@ -463,7 +473,8 @@ def analyse(layout_id, taken=(), drop=()):
             # piece 20 rows tall with the floor laid on its top, MS-227)
             for (cx, cy) in comp:
                 if (cx, cy - 1) not in cells and cy - 1 >= 0 and floor[cy - 1][cx] \
-                        and differs_from_floor(cx, cy - 1) and not floor_shade(cx, cy - 1):
+                        and differs_from_floor(cx, cy - 1) and not floor_shade(cx, cy - 1) \
+                        and (cx, cy - 1) not in apart:
                     rects.append((cx * 16, cy * 16 - 16, cx * 16 + 16, cy * 16))
             if not any(differs_from_floor(cx, cy) for (cx, cy) in comp):
                 notes.append("left flat: %d cells at %s (drawn as floor)" % (len(comp), comp[0]))
