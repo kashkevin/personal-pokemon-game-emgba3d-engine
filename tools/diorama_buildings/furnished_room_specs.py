@@ -836,6 +836,47 @@ def oceanic_museum_1f():
     ])
 
 
+# ── Slateport's Oceanic Museum, 2F ─────────────────────────────────────────
+#
+# 20 x 9 cells, no model until the object audit of 2026-11-14: its cases, tables, stands and the pillar
+# lay drawn on the floor. The back wall (rows 0-32, the tall glass tank set in it and the plaques painted
+# on it), its doorway down (cell 6,1, walked into) cut out under its arch as 1F's; three glass cases
+# against it (x 128-160, 240-272, 288-320: 16 rows of front, their glass tops back to the wall); the
+# white pillar standing out of it (x 160-176: 32 rows, its top from the wall's foot); two display tables
+# (x 32-96: 7 rows) with the models on them (6-8 rows more); two computers on their stands (16 rows); two
+# glass tubes (x 288-304: 23 rows, their lids their tops); the ship model on its plinth (the plinth 7
+# rows, the model 6 more on it). The shadows are the floor's.
+
+MUSEUM_TABLE = ("fff6de", "eedeac")              # the display tables' top
+MUSEUM_PLINTH = ("ffffff", "c5cdf6", "94a4ee")   # the ship model's plinth's top
+
+
+def oceanic_museum_2f():
+    facet, own_shell, piece = _helpers()
+    fl = MUSEUM_FLOOR
+    return own_shell([
+        piece("model_sub", [(40, 48, 63, 63)], 8, base=7, leave=MUSEUM_TABLE),
+        piece("model_sphere", [(66, 50, 78, 60)], 8, base=7, leave=MUSEUM_TABLE),
+        piece("model_ship", [(48, 96, 80, 112)], 6, base=7, leave=MUSEUM_TABLE),
+        piece("table_n", [(32, 46, 96, 80)], 7, leave=fl),
+        piece("table_s", [(32, 94, 96, 128)], 7, leave=fl),
+        piece("ship", [(210, 105, 240, 117)], 6, base=7, leave=MUSEUM_PLINTH),
+        piece("plinth", [(208, 112, 240, 128)], 7, leave=fl),
+        piece("pc_w", [(192, 56, 216, 80)], 16, leave=fl),
+        piece("pc_e", [(240, 56, 264, 80)], 16, leave=fl),
+        piece("tube_n", [(288, 48, 304, 80)], 23, leave=fl),
+        piece("tube_s", [(288, 96, 304, 128)], 23, leave=fl),
+        piece("case_w", [(128, 16, 160, 40)], 16, leave=fl),
+        piece("case_mid", [(240, 16, 272, 40)], 16, leave=fl),
+        piece("case_e", [(288, 16, 320, 40)], 16, leave=fl),
+        piece("pillar", [(160, 0, 176, 64)], 32, leave=fl),
+        piece("wall_w", [(0, 0, 93, 32), (93, 0, 115, 7)], 32, fill=16, foot=32, side=MUSEUM_WALL_SIDE),
+        piece("wall_e", [(115, 0, 320, 32)], 32, fill=16, side=MUSEUM_WALL_SIDE),
+        piece("side_w", [], 32, side=MUSEUM_WALL_SIDE, walls=[((0, 144), (0, 32))]),
+        piece("side_e", [], 32, side=MUSEUM_WALL_SIDE, walls=[((320, 32), (320, 144))]),
+    ])
+
+
 # ── The Battle Tower's multi partner room ─────────────────────────────────
 #
 # 21 x 15 cells, no model until the object audit of 2026-11-14. The back wall (rows 0-32, the lift's
@@ -999,6 +1040,178 @@ def palace_corridor():
     facet, own_shell, piece = _helpers()
     return own_shell([
         piece("wall", [(0, 0, 272, 64)], 64, fill=16, side=PALACE_CORRIDOR_WALL_SIDE),
+    ])
+
+
+# ── Slateport's Pokemon Fan Club ───────────────────────────────────────────
+#
+# 14 x 11 cells, no model until the object audit of 2026-11-14: everything in it lay drawn on the floor.
+# Its tiles keep the floor, the rug, the furniture's shadows and the wall on their lower layer and every
+# piece of furniture on the upper, so each piece stands on its cells' own floor (`under`: own). The back
+# wall is drawn from 8 rows down the first cell (the black over it is nothing) to its foot 40 rows down,
+# as Rustboro's school's (a picture and the club's emblem on it); two pilasters stand 4 rows proud of it
+# (x 32-48, x 176-192, their feet at row 44). Against it a low cabinet (x 0-32: 13 rows of front, its top
+# back to the wall), two tall bookcases (x 192-224: 22 rows, their tops back to the wall), two plants (cards). On the rug the glass
+# table (x 81-143: 14 rows of front, its legs and its shelf, the glass its top) and three sofas - walked
+# on, as the Center's stools are, so 6 rows as its stools: whoever sits on them sinks in as onto a stool
+# (the chairman on the north one), the backs laid on their tops. Two more plants at the front corners.
+
+FANCLUB_FLOOR = ("f6eeb4", "ded58b", "c5bd7b", "ee836a", "cd6a6a", "ffcd94")   # the floor, the rug, its shadows
+FANCLUB_WALL = ("e6d583", "f6eecd", "9c9c8b", "a49441", "d5a46a")
+FANCLUB_WALL_SIDE = (64, 8, 80, 40)      # a plain stretch of the wall, top to foot
+
+
+def slateport_fan_club():
+    facet, own_shell, piece = _helpers()
+    plants = [piece("plant_%d_%d" % (x0 // 16, z1 // 16), [(x0, z1 - 32, x0 + 16, z1)], 28,
+                    leave=FANCLUB_FLOOR + FANCLUB_WALL, card=True)
+              for (x0, z1) in ((48, 48), (160, 48), (0, 176), (208, 176))]
+    return own_shell(plants + [
+        piece("sofa_n", [(80, 73, 144, 96)], 6, leave=FANCLUB_FLOOR),
+        piece("sofa_w", [(48, 96, 64, 128)], 6, leave=FANCLUB_FLOOR),
+        piece("sofa_e", [(160, 96, 176, 128)], 6, leave=FANCLUB_FLOOR),
+        piece("table", [(81, 98, 143, 131)], 14, leave=FANCLUB_FLOOR),
+        piece("cabinet", [(0, 27, 32, 48)], 13, leave=FANCLUB_FLOOR + FANCLUB_WALL),
+        piece("bookcases", [(192, 18, 224, 47)], 22, leave=FANCLUB_FLOOR + FANCLUB_WALL),
+        piece("pilaster_w", [(32, 8, 48, 44)], 32, leave=FANCLUB_FLOOR),
+        piece("pilaster_e", [(176, 8, 192, 44)], 32, leave=FANCLUB_FLOOR),
+        piece("wall", [(0, 8, 224, 40)], 32, fill=16, foot=40, side=FANCLUB_WALL_SIDE),
+        piece("side_w", [], 32, side=FANCLUB_WALL_SIDE, walls=[((0, 176), (0, 40))]),
+        piece("side_e", [], 32, side=FANCLUB_WALL_SIDE, walls=[((224, 40), (224, 176))]),
+    ])
+
+
+# ── Lilycove's Pokemon Trainer Fan Club ───────────────────────────────────
+#
+# 12 x 14 cells, a house's room (the generic building's tiles): the houses' bookcase, chest, television,
+# cupboard, chairs, one table and its teapot stood in it already, found by their tiles, but its back wall
+# with its two posters, the two partitions across the room and its two white sofas lay drawn on the floor
+# (the object audit of 2026-11-14), and the second table - its tiles not the house's, no teapot on it -
+# stood only as its blocked cells. The back wall its drawn 32 rows, as a house's. The partitions (x 0-47
+# and x 145-192): their white tops rows 107-120, their faces down to their feet at row 144 - 24 rows, a
+# half wall whoever stands behind it is seen over. The sofas, against the back wall (x 160-192) and the
+# west partition (x 0-32): 8 rows of front, their backs laid on their tops - walked on as the Center's
+# stools are, and whoever sits on them (the boy on the west one) sinks in as onto a stool. The second
+# table as the house's (11 rows). The tiles keep the floor, the rug, the wall and the partitions on their
+# lower layer and the furniture on the upper, so each piece stands on its cells' own floor.
+
+TRAINER_CLUB_FLOOR = ("ded552", "bdb431", "8b8b8b", "9c9410")   # the house kit's planks and their shade
+TRAINER_CLUB_RUG = ("ffcd8b", "f6f6a4")
+TRAINER_CLUB_WALL = ("d5d5b4", "b4b4a4", "ffffff", "629c8b")    # plaster, trim, baseboard
+TRAINER_CLUB_WALL_SIDE = (48, 0, 64, 32)     # a plain stretch of the back wall, top to foot
+
+
+def trainer_fan_club():
+    facet, own_shell, piece = _helpers()
+    fl = TRAINER_CLUB_FLOOR
+    return own_shell([
+        piece("sofa_ne", [(160, 24, 192, 48)], 8, leave=fl + TRAINER_CLUB_WALL),
+        piece("sofa_w", [(0, 136, 32, 160)], 8, leave=fl),
+        piece("table_w", [(66, 144, 94, 177)], 11, leave=TRAINER_CLUB_RUG, solid=True, foot=177),
+        piece("partition_w", [(0, 107, 45, 108), (0, 108, 46, 109), (0, 109, 47, 144)], 24, fill=16,
+              side=(32, 119, 44, 144)),
+        piece("partition_e", [(147, 107, 192, 108), (146, 108, 192, 109), (145, 109, 192, 144)], 24, fill=16,
+              side=(148, 119, 160, 144)),
+        piece("wall", [(0, 0, 192, 32)], 32, fill=16, foot=32, side=TRAINER_CLUB_WALL_SIDE),
+        piece("side_w", [], 32, side=TRAINER_CLUB_WALL_SIDE, walls=[((0, 224), (0, 32))]),
+        piece("side_e", [], 32, side=TRAINER_CLUB_WALL_SIDE, walls=[((192, 32), (192, 224))]),
+    ])
+
+
+# ── Stern's Shipyard, ground floor (Slateport) ─────────────────────────────
+#
+# 21 x 15 cells, no model until the object audit of 2026-11-14: everything in it lay drawn on the
+# floor, its people standing on flat stools. The office (x 0-96): its back wall, the stairs up cut out
+# of it under their lintel (the opening x 40-72), a cabinet with a model ship on it against the wall,
+# three desks (8 rows) with their screens standing on them (6 more), five stools (6 rows, walked on as
+# the Center's), a whiteboard on its legs (a card, 30 rows). Between the office and the workshop a wall
+# runs down the room (x 96-112), drawn as its long white top: 30 rows tall, the gap where the two rooms
+# meet at rows 9-10. The workshop: its back wall (three consoles against it, signs and hooks on it), an
+# inner wall across it (x 112-240, 27 rows) with a post at its end, the small machine and the engine and
+# its pump before it, three lattice girders standing on end (cards, 45-61 rows: the floor drawn between
+# their bars), and the lumber - beams laid lengthwise in piles whose ends face the room, each pile its
+# ends' height (8-24 rows), its top running back over its cells. The tiles keep the floor and the walls
+# on their lower layer and the furniture on the upper, so each piece stands on its cells' own floor.
+
+SHIPYARD_FLOOR = ("739c8b", "628b83", "a4cdbd", "8bb4ac", "9c8b94",   # the office's tiles
+                  "6a7b41", "839473", "acb494", "dedec5")              # the workshop's
+SHIPYARD_WALL = ("ffffff", "dedede", "8b94a4", "6a7b7b")
+SHIPYARD_WALL_SIDE = (80, 0, 96, 32)        # a plain stretch of the office's back wall, top to foot
+SHIPYARD_POST_SIDE = (98, 121, 110, 146)    # the dividing wall's end, its striped face
+SHIPYARD_RAIL_SIDE = (140, 194, 156, 208)   # the gallery's south rail: its handrail over balusters
+
+
+def shipyard_1f():
+    facet, own_shell, piece = _helpers()
+    fl = SHIPYARD_FLOOR
+    stools = [piece("stool_%d_%d" % (x0 // 16, y0 // 16), [(x0, y0, x0 + 12, y0 + 14)], 6, leave=fl)
+              for (x0, y0) in ((82, 81), (18, 97), (66, 129), (2, 145), (18, 193))]
+    desks = []
+    for n, y in enumerate((72, 120, 168)):
+        desks += [piece("screen_%d" % n, [(2, y, 16, y + 9)], 6, base=8, leave=fl),
+                  piece("desk_%d" % n, [(0, y + 3, 32, y + 24)], 8, leave=fl)]
+    # (the floor drawn between a girder's bars at its foot its own: the room's first floor, under it, is
+    # the office's)
+    girders = [piece("girder_%d" % n, [(x0, y0, x0 + 16, y1)], h, card=True, claim=[(x0, y1 - 1, x0 + 16, y1)])
+               for n, (x0, y0, y1, h) in enumerate(((112, 64, 112, 45), (160, 144, 208, 61),
+                                                     (224, 160, 208, 45)))]
+    lumber = [piece("lumber_%d_%d" % (x0 // 16, y0 // 16), [(x0, y0, x1, y1)], h, leave=fl)
+              for (x0, y0, x1, y1, h) in ((304, 64, 320, 112, 8), (320, 48, 336, 112, 16),
+                                          (288, 176, 320, 224, 8), (320, 160, 336, 224, 16),
+                                          (112, 176, 128, 240, 24), (128, 192, 144, 240, 16),
+                                          (144, 208, 160, 240, 8))]
+    return own_shell(stools + desks + girders + lumber + [
+        piece("whiteboard", [(64, 97, 96, 127)], 30, leave=fl, card=True),
+        piece("cabinet", [(0, 24, 32, 48)], 10, leave=fl + SHIPYARD_WALL),
+        piece("pump", [(192, 120, 224, 161)], 24, leave=fl),
+        piece("engine", [(176, 72, 240, 137)], 30, leave=fl + SHIPYARD_WALL),
+        piece("machine", [(144, 72, 176, 120)], 24, leave=fl + SHIPYARD_WALL),
+        piece("consoles", [(128, 16, 176, 39)], 17, back=32, leave=fl + SHIPYARD_WALL),
+        piece("post", [(240, 57, 256, 97)], 28, leave=fl, side=SHIPYARD_POST_SIDE),
+        piece("wall_inner", [(112, 60, 240, 96)], 27, fill=16, side=SHIPYARD_POST_SIDE),
+        piece("wall_column_n", [(96, 0, 112, 146)], 30, fill=16, side=SHIPYARD_POST_SIDE),
+        piece("wall_column_s", [(96, 169, 112, 240)], 30, fill=16, side=SHIPYARD_POST_SIDE),
+        piece("wall_office", [(0, 0, 40, 32), (40, 0, 72, 12), (72, 0, 96, 32)], 32, fill=16, foot=32,
+              side=SHIPYARD_WALL_SIDE),
+        piece("wall_works", [(112, 0, 336, 32)], 32, fill=16, foot=32, side=SHIPYARD_WALL_SIDE),
+        piece("side_w", [], 32, side=SHIPYARD_WALL_SIDE, walls=[((0, 240), (0, 32))]),
+        piece("side_e", [], 32, side=SHIPYARD_WALL_SIDE, walls=[((336, 32), (336, 240))]),
+    ])
+
+
+# ── Stern's Shipyard, upper floor ──────────────────────────────────────────
+#
+# 17 x 15 cells, no model until the object audit of 2026-11-14: the gallery over the workshop. Its back
+# wall with the stairs down cut out as below, three pairs of desks (8 rows) with a screen on one of each,
+# fifteen stools (6 rows, walked on), two whiteboards on their legs (cards, 30 rows) and a bin (12 rows);
+# the railing round the opening over the workshop (x 128-256, rows 80-208): its north and south sides
+# 14 rows (a handrail on balusters over the floor's edge), its west and east sides drawn as strips
+# from above, boxes 14 rows tall from where their strips begin to the south side. Through the opening
+# the drawing shows the workshop below: the floor's, as drawn.
+
+def shipyard_2f():
+    facet, own_shell, piece = _helpers()
+    fl = SHIPYARD_FLOOR
+    stools = [piece("stool_%d_%d" % (x0 // 16, y0 // 16), [(x0, y0, x0 + 12, y0 + 14)], 6, leave=fl)
+              for (x0, y0) in ((18, 97), (50, 97), (114, 97), (114, 113), (2, 145), (50, 145), (114, 145),
+                               (18, 193), (50, 193), (178, 209), (194, 209), (178, 49), (242, 49),
+                               (130, 65), (194, 65))]
+    desks = []
+    for n, (y, px) in enumerate(((72, 34), (120, 2), (168, 2))):
+        desks += [piece("screen_%d" % n, [(px, y, px + 14, y + 9)], 6, base=8, leave=fl),
+                  piece("desks_%d" % n, [(0, y + 3, 64, y + 24)], 8, leave=fl)]
+    return own_shell(stools + desks + [
+        piece("whiteboard_w", [(144, 49, 176, 79)], 30, leave=fl, card=True),
+        piece("whiteboard_e", [(208, 49, 240, 79)], 30, leave=fl, card=True),
+        piece("bin", [(114, 176, 126, 192)], 12, leave=fl),
+        piece("rail_w", [(128, 89, 136, 208)], 14, side=SHIPYARD_RAIL_SIDE),
+        piece("rail_e", [(248, 89, 256, 208)], 14, side=SHIPYARD_RAIL_SIDE),
+        piece("rail_n", [(128, 80, 256, 96)], 14, side=SHIPYARD_RAIL_SIDE),
+        piece("rail_s", [(128, 192, 256, 208)], 14, side=SHIPYARD_RAIL_SIDE),
+        piece("wall", [(0, 0, 40, 32), (40, 0, 72, 12), (72, 0, 272, 32)], 32, fill=16, foot=32,
+              side=SHIPYARD_WALL_SIDE),
+        piece("side_w", [], 32, side=SHIPYARD_WALL_SIDE, walls=[((0, 240), (0, 32))]),
+        piece("side_e", [], 32, side=SHIPYARD_WALL_SIDE, walls=[((272, 32), (272, 240))]),
     ])
 
 
@@ -1689,6 +1902,11 @@ def furnished_room_specs():
                          "under": "own", "reuse_in": frozenset(), "pieces": oceanic_museum_1f()},
         },
         {
+            "name": "oceanic_museum_2f",
+            "interior": {"layout": "LAYOUT_SLATEPORT_CITY_OCEANIC_MUSEUM_2F", "ground": [0x201, 0x202],
+                         "under": "own", "reuse_in": frozenset(), "pieces": oceanic_museum_2f()},
+        },
+        {
             "name": "tower_multi_partner_room",
             "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_TOWER_MULTI_PARTNER_ROOM", "ground": [0x200],
                          "under": "own", "reuse_in": frozenset(), "pieces": tower_multi_partner_room()},
@@ -1717,6 +1935,27 @@ def furnished_room_specs():
             "name": "palace_corridor",
             "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_PALACE_CORRIDOR", "ground": [0x201],
                          "under": "own", "reuse_in": frozenset(), "pieces": palace_corridor()},
+        },
+        {
+            "name": "slateport_fan_club",
+            "interior": {"layout": "LAYOUT_SLATEPORT_CITY_POKEMON_FAN_CLUB", "ground": [0x201, 0x202, 0x231],
+                         "shade": [0x204, 0x205, 0x228, 0x234], "under": "own", "reuse_in": frozenset(),
+                         "pieces": slateport_fan_club()},
+        },
+        {
+            "name": "trainer_fan_club",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_POKEMON_TRAINER_FAN_CLUB", "ground": [0x223],
+                         "under": "own", "reuse_in": frozenset(), "pieces": trainer_fan_club()},
+        },
+        {
+            "name": "shipyard_1f",
+            "interior": {"layout": "LAYOUT_SLATEPORT_CITY_STERNS_SHIPYARD_1F", "ground": [0x202, 0x229, 0x228],
+                         "under": "own", "reuse_in": frozenset(), "pieces": shipyard_1f()},
+        },
+        {
+            "name": "shipyard_2f",
+            "interior": {"layout": "LAYOUT_SLATEPORT_CITY_STERNS_SHIPYARD_2F", "ground": [0x202],
+                         "under": "own", "reuse_in": frozenset(), "pieces": shipyard_2f()},
         },
         {
             "name": "safari_rest_house",
