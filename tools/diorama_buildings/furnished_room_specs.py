@@ -153,6 +153,9 @@ def mossdeep_game_corner_1f():
 # The black front corners are floor (`open`), the side walls run on to the front.
 
 LOUNGE_FLOOR = ("0073ff", "00b4ff", "73deff")
+# the floor tiles' dark borders round a plant: a plant's card leaves them to the floor (the object
+# audit of 2026-11-14: kept, each pot stood before a dark-blue square)
+LOUNGE_TILE_EDGES = ("0052de", "0039b4")
 LOUNGE_WALL = ("ffd573", "ffffff", "9494a4", "cdbdc5", "b46218", "e69441", "e6ac5a")
 LOUNGE_WALL_SIDE = (0, 0, 16, 32)
 
@@ -164,7 +167,7 @@ def _lounge(w, h, plants, machine, chairs, extra=()):
                     leave=LOUNGE_FLOOR)
               for (cx, cy) in chairs]
     pieces += [piece("plant_%d_%d" % (x0 // 16, z1 // 16), [(x0, z0, x0 + 16, z1)], 28,
-                     leave=LOUNGE_FLOOR + LOUNGE_WALL, card=True)
+                     leave=LOUNGE_FLOOR + LOUNGE_TILE_EDGES + LOUNGE_WALL, card=True)
                for (x0, z0, z1) in plants + list(extra)]
     mx, mz0, mz1, lid = machine
     pieces += [
@@ -277,7 +280,8 @@ def scotts_house():
     facet, own_shell, piece = _helpers()
     return own_shell([
         piece("chair", [(80, 48, 96, 64)], 6, leave=LOUNGE_FLOOR),
-        piece("plant", [(80, 64, 96, 96)], 28, leave=LOUNGE_FLOOR + LOUNGE_WALL, card=True),
+        piece("plant", [(80, 64, 96, 96)], 28, leave=LOUNGE_FLOOR + LOUNGE_TILE_EDGES + LOUNGE_WALL,
+              card=True),
         piece("wall", [(0, 0, 96, 32)], 24, fill=16, side=LOUNGE_WALL_SIDE),
         piece("side_w", [], 24, side=LOUNGE_WALL_SIDE, walls=[((0, 128), (0, 32))]),
         piece("side_e", [], 24, side=LOUNGE_WALL_SIDE, walls=[((96, 32), (96, 128))]),
@@ -731,6 +735,104 @@ def tent_lobby():
         piece("wall", [(0, 0, 208, 30)], 30, fill=16, side=TENT_WALL_SIDE),
         piece("side_w", [], 30, side=TENT_CURTAIN, walls=[((16, 160), (16, 30))]),
         piece("side_e", [], 30, side=TENT_CURTAIN, walls=[((192, 30), (192, 160))]),
+    ])
+
+
+# ── The Battle Tents' corridor (Fallarbor's, Slateport's, Verdanturf's) ────
+#
+# One layout, 5 x 8 cells, no model until the object audit of 2026-11-14: its back wall lay drawn on
+# the floor. The wall (rows 0-32: its top band, panels and red baseboard) with the door to the battle
+# room painted on it (x 24-56: the attendant walks the player into it, as the lobby's); the warp pad
+# at the front is the floor's.
+
+TENT_CORRIDOR_WALL_SIDE = (0, 0, 8, 32)
+
+
+def tent_corridor():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("wall", [(0, 0, 80, 32)], 32, fill=16, side=TENT_CORRIDOR_WALL_SIDE),
+        piece("side_w", [], 32, side=TENT_CORRIDOR_WALL_SIDE, walls=[((0, 128), (0, 32))]),
+        piece("side_e", [], 32, side=TENT_CORRIDOR_WALL_SIDE, walls=[((80, 32), (80, 128))]),
+    ])
+
+
+# ── The lifts (the Battle Tower's and Trainer Hill's; the Department Store's) ─
+#
+# Two layouts of the same tiles, 5 x 7 cells (LAYOUT_BATTLE_ELEVATOR) and 5 x 6 (the store's), no
+# model until the object audit of 2026-11-14. The lift's back wall (rows 8-48, under 8 rows of the
+# dark outside) with its window and handrail painted on it; the floor and its mat from row 48.
+
+LIFT_WALL_SIDE = (1, 8, 5, 48)       # the plain panel inside the wall's left edge (its navy lines read as bars)
+
+
+def lift(front):
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("wall", [(0, 8, 80, 48)], 40, fill=16, side=LIFT_WALL_SIDE),
+        piece("side_w", [], 40, side=LIFT_WALL_SIDE, walls=[((0, front), (0, 48))]),
+        piece("side_e", [], 40, side=LIFT_WALL_SIDE, walls=[((80, 48), (80, front))]),
+    ])
+
+
+# ── The Battle Tower's corridors (to the battle room; to the multi battle room) ─
+#
+# Two layouts, 17 x 5 cells each, no model until the object audit of 2026-11-14. The back wall
+# (rows 0-32: panels over a blue or red baseboard) with the doors painted on it - the lift's (x 120-
+# 150) and the battle rooms' (walked into, as the Battle Tents' door); the plain corridor's two potted
+# plants at its ends (cells 0 and 16, rows 48-80) stand as cards; the floor's Poke Ball marks are the
+# floor's.
+
+TOWER_FLOOR = ("00b4ff", "73deff", "0073ff", "0052de")
+
+
+def tower_corridor(side, plants):
+    facet, own_shell, piece = _helpers()
+    return own_shell([piece("plant_%d" % x0, [(x0, 48, x0 + 16, 80)], 30, leave=TOWER_FLOOR, card=True)
+                      for x0 in plants] + [
+        piece("wall", [(0, 0, 272, 32)], 32, fill=16, side=side),
+        piece("side_w", [], 32, side=side, walls=[((0, 80), (0, 32))]),
+        piece("side_e", [], 32, side=side, walls=[((272, 32), (272, 80))]),
+    ])
+
+
+# ── Slateport's Oceanic Museum 1F ─────────────────────────────────────────
+#
+# 20 x 9 cells, no model until the object audit of 2026-11-14: its walls, cases, tanks and counters
+# lay drawn on the floor. The back wall (rows 0-32) with the fossil tank, the depth-measuring
+# machine and the plaques painted on it, its doorway up to 2F (cell 6,1, walked into) cut out under
+# its arch: the dark well x 93-115 from row 7. Against the wall two glass cases (x 144-168 and 192-
+# 216, rows 0-40): 32 rows of front, their lids laid back to the wall. On the floor two glass tanks
+# (x 32-48: 22 rows of front under their tops), three glass boxes on stands (x 240-256 and 288-304:
+# 17 rows) and the two reception counters, each a U open to the front (its arms 16 wide down to the
+# room's front row, its bar rows 94-112; 8 rows of front). The shadows and the mat are the floor's.
+
+MUSEUM_FLOOR = ("4aa4a4", "7bbdb4", "a4d5c5", "006a73", "208b94")
+MUSEUM_WALL_SIDE = (0, 0, 16, 32)
+
+
+def _museum_counter(name, west):
+    facet, own_shell, piece = _helpers()
+    shape = [(west, 94, west + 16, 144), (west + 48, 94, west + 64, 144), (west + 16, 94, west + 48, 112)]
+    return piece(name, shape, 8, leave=MUSEUM_FLOOR)
+
+
+def oceanic_museum_1f():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("case_w", [(144, 0, 168, 40)], 32, back=32, leave=MUSEUM_FLOOR),
+        piece("case_e", [(192, 0, 216, 40)], 32, back=32, leave=MUSEUM_FLOOR),
+        piece("tank_n", [(32, 48, 48, 80)], 22, leave=MUSEUM_FLOOR),
+        piece("tank_s", [(32, 96, 48, 128)], 22, leave=MUSEUM_FLOOR),
+        piece("box_w", [(240, 53, 256, 80)], 17, leave=MUSEUM_FLOOR),
+        piece("box_ne", [(288, 53, 304, 80)], 17, leave=MUSEUM_FLOOR),
+        piece("box_se", [(288, 101, 304, 128)], 17, leave=MUSEUM_FLOOR),
+        _museum_counter("counter_w", 80),
+        _museum_counter("counter_e", 176),
+        piece("wall_w", [(0, 0, 93, 32), (93, 0, 115, 7)], 32, fill=16, foot=32, side=MUSEUM_WALL_SIDE),
+        piece("wall_e", [(115, 0, 320, 32)], 32, fill=16, side=MUSEUM_WALL_SIDE),
+        piece("side_w", [], 32, side=MUSEUM_WALL_SIDE, walls=[((0, 144), (0, 32))]),
+        piece("side_e", [], 32, side=MUSEUM_WALL_SIDE, walls=[((320, 32), (320, 144))]),
     ])
 
 
@@ -1384,6 +1486,38 @@ def furnished_room_specs():
             "name": "safari_entrance",
             "interior": {"layout": "LAYOUT_ROUTE121_SAFARI_ZONE_ENTRANCE", "ground": [0x268],
                          "under": "own", "reuse_in": frozenset(), "pieces": safari_entrance()},
+        },
+        {
+            "name": "tent_corridor",
+            "interior": {"layout": "LAYOUT_BATTLE_TENT_CORRIDOR", "ground": [0x23A, 0x23B],
+                         "under": "own", "reuse_in": frozenset(), "pieces": tent_corridor()},
+        },
+        {
+            "name": "battle_lift",
+            "interior": {"layout": "LAYOUT_BATTLE_ELEVATOR", "ground": [0x265],
+                         "under": "own", "reuse_in": frozenset(), "pieces": lift(112)},
+        },
+        {
+            "name": "store_lift",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_DEPARTMENT_STORE_ELEVATOR", "ground": [0x265],
+                         "under": "own", "reuse_in": frozenset(), "pieces": lift(96)},
+        },
+        {
+            "name": "tower_corridor",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_TOWER_CORRIDOR", "ground": [0x200, 0x229],
+                         "under": "own", "reuse_in": frozenset(),
+                         "pieces": tower_corridor((96, 0, 112, 32), (0, 256))},
+        },
+        {
+            "name": "tower_multi_corridor",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_TOWER_MULTI_CORRIDOR",
+                         "ground": [0x200, 0x229], "under": "own", "reuse_in": frozenset(),
+                         "pieces": tower_corridor((64, 0, 80, 32), ())},
+        },
+        {
+            "name": "oceanic_museum_1f",
+            "interior": {"layout": "LAYOUT_SLATEPORT_CITY_OCEANIC_MUSEUM_1F", "ground": [0x201, 0x202],
+                         "under": "own", "reuse_in": frozenset(), "pieces": oceanic_museum_1f()},
         },
         {
             "name": "safari_rest_house",
