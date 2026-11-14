@@ -2015,6 +2015,18 @@ def _sea_rock_cells(layout: dict) -> frozenset[int]:
     return frozenset(cells)
 
 
+# Cells drawn with a fence over the mountain's ground - General's fence art on Lavaridge's dirt, by Route 112's
+# and Mt. Chimney's cable car stations: a fence standing on the ground (props.c), never the mountain's rock. Read
+# as rock (its dirt is the mountain's tiles), Mt. Chimney's and one of Route 112's two stood as blocks a tile
+# high, their pickets painted on, and the other lay flat (the object audit of 2026-11-14).
+NOT_ROCK_METATILES = frozenset({("gTileset_Lavaridge", 0x296)})
+
+
+def _not_rock_cells(cells: tuple[dict, ...]) -> frozenset[int]:
+    return frozenset(offset for offset, cell in enumerate(cells)
+                     if (cell.get("tileset"), cell.get("metatile")) in NOT_ROCK_METATILES)
+
+
 def _prop_cells(layout: dict) -> frozenset[int]:
     """The cells of a layout voxel_props.py's objects are drawn over (the
     sea's rocks and stacks, the sand's boulders): models of their own."""
@@ -2213,7 +2225,8 @@ def compile_data(root: Path) -> dict:
                 layout["width"], layout["height"],
                 exclude=_prop_cells(layout) | frozenset(
                     offset for offset, entry in solved.items() if entry["solid"]),
-                events=layout_events.get(layout["id"], frozenset()))
+                events=layout_events.get(layout["id"], frozenset()),
+                never=_not_rock_cells(cells[layout["id"]]))
         except MountainArtError as error:
             raise RuleError(f"{layout['id']}: {error}") from error
         mountain_outlines[layout["id"]] = mountain_outline_cells(

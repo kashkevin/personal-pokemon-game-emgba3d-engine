@@ -342,7 +342,11 @@ def faces_between_levels(cells: tuple[dict, ...], summaries: tuple[dict, ...],
 def validate_layout(cells: tuple[dict, ...], summaries: tuple[dict, ...],
                     width: int, height: int,
                     exclude: frozenset[int] = frozenset(),
-                    events: frozenset[int] = frozenset()) -> frozenset[int]:
+                    events: frozenset[int] = frozenset(),
+                    never: frozenset[int] = frozenset()) -> frozenset[int]:
+    """The layout's mountain art cells. `never`: cells drawn over the mountain's
+    ground that are something else (a fence standing on it, props.c): left out of
+    the result, and only they - the rock round them is found as before."""
     offsets = detect_layout(cells, summaries, width, height)
     dense_forest = {offset for offset, cell in enumerate(cells)
                     if cell.get("tileset") == "gTileset_General"
@@ -364,5 +368,5 @@ def validate_layout(cells: tuple[dict, ...], summaries: tuple[dict, ...],
     seeds = frozenset(offset for offset, cell in enumerate(cells)
                       if cell.get("behavior") == "MB_MOUNTAIN_TOP" and cell.get("collision"))
     enclosed = enclosed_tops(cells, width, height, events) - exclude
-    return offsets | enclosed | mass_extension(cells, summaries, width, height,
-                                               offsets | seeds | enclosed, exclude)
+    return (offsets | enclosed | mass_extension(cells, summaries, width, height,
+                                                offsets | seeds | enclosed, exclude)) - never

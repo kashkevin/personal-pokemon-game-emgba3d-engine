@@ -2333,14 +2333,33 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
             }
             {
                 /* A detail object stands here (props.h, gl_props.c): the
-                 * ground without the flat picture of it. */
+                 * ground without the flat picture of it - on its top, and on
+                 * its sides where they show the cell's own drawing (a side
+                 * the rules leave undrawn stays so): the riser under an object
+                 * at a raised edge showed its flat picture (Route 109's
+                 * parasol: the shadow painted on the sand under it, down the
+                 * sand platform's face; the object audit of 2026-11-14). */
                 uint16_t propGround;
                 uint8_t propLayer;
 
                 if (resolvedCells[gridIndex].pixelObjectId == 0
                  && DioramaProps_GroundMaterial(snapshot, gridIndex, &propGround, &propLayer))
+                {
                     SetTerrainMaterial(&cell->materials[DIORAMA_MATERIAL_FACE_TOP], propGround,
                                        propLayer);
+                    for (face = DIORAMA_MATERIAL_FACE_NORTH; face <= DIORAMA_MATERIAL_FACE_WEST; face++)
+                    {
+                        uint16_t own = resolvedCells[gridIndex].materials[face].metatileId;
+
+                        if (own != DIORAMA_MATERIAL_METATILE_SELF && own != source->metatileId)
+                            continue;
+                        if (cell->materials[face].layer != DIORAMA_MATERIAL_NONE)
+                            SetTerrainMaterialTransformed(&cell->materials[face], propGround, propLayer,
+                                                          cell->materials[face].rotation,
+                                                          cell->materials[face].flags);
+                        SetTerrainMaterial(&cell->underlayMaterials[face], propGround, propLayer);
+                    }
+                }
             }
             for (face = 0; face < cell->measuredBandCount; face++)
             {

@@ -36,6 +36,8 @@ static void Check(bool condition, const char *expression, int line)
 #define LAYOUT_ROUTE110 26
 #define LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST 265
 #define LAYOUT_ROUTE124 40
+#define LAYOUT_ROUTE112 28
+#define LAYOUT_SAFARI_ZONE_SOUTH 241
 #define LAYOUT_ROUTE126 42
 #define LAYOUT_BATTLE_FRONTIER_OUTSIDE_EAST 345
 
@@ -162,6 +164,21 @@ static void TestFind(void)
         }
         CHECK(DioramaProps_Find(LAYOUT_LAVARIDGE_TOWN, 0x29F) == NULL
            && DioramaProps_Find(LAYOUT_LAVARIDGE_TOWN, 0x2A7) == NULL);
+    }
+    /* The fence by the cable car stations (General's fence over Lavaridge's dirt) stands as General's; the
+     * Safari Zone's feeders and Slateport's rowboat are low blocks (the object audit of 2026-11-14). */
+    {
+        const struct DioramaProp *general = DioramaProps_Find(LAYOUT_ROUTE110, 0x149);
+        const struct DioramaProp *station = DioramaProps_Find(LAYOUT_ROUTE112, 0x296);
+
+        CHECK(general != NULL && station != NULL && station->kind == DIORAMA_PROP_KIND_FENCE
+           && station->form == general->form && station->artBottom == general->artBottom
+           && station->shadowIndex == general->shadowIndex && station->shadowFromRow == general->shadowFromRow
+           && station->depth == general->depth && station->ground == DIORAMA_PROP_GROUND_LOWER);
+        prop = DioramaProps_Find(LAYOUT_SAFARI_ZONE_SOUTH, 0x310);
+        CHECK(prop != NULL && prop->form == DIORAMA_PROP_BLOCK && prop->height16 == 8);
+        prop = DioramaProps_Find(LAYOUT_SLATEPORT_CITY, 0x229);
+        CHECK(prop != NULL && prop->form == DIORAMA_PROP_BLOCK && prop->height16 == 6);
     }
 }
 

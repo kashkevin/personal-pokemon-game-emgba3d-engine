@@ -184,7 +184,12 @@ static const struct DioramaProp sRustboro[] = {
 /* An air mattress lying on the sand, three cells long, a little thicker than
  * drawn. */
 #define AIR_MATTRESS(id) { PROP(id, DECOR, BLOCK, 1, LOWER), .height16 = 2 }
+/* The rowboat on its stand by Stern's shipyard, 3 x 2 cells (the object audit
+ * of 2026-11-14: it lay flat on the grass): a low hull, the boat as drawn on
+ * its top, the grass under it (each cell used once, as the boat). */
+#define ROWBOAT(id) { PROP(id, DECOR, BLOCK, 1, LOWER), .height16 = 6 }
 static const struct DioramaProp sSlateport[] = {
+    ROWBOAT(0x220), ROWBOAT(0x221), ROWBOAT(0x222), ROWBOAT(0x228), ROWBOAT(0x229), ROWBOAT(0x22A),
     STALL_ROOF(0x205),
     STALL_ROOF(0x207),
     BASKET(0x20C),
@@ -317,6 +322,9 @@ static const struct DioramaProp sPetalburg[] = {
 /* Lilycove: the blue railing along the harbour (Rustboro's iron fence's
  * kind: shadow colour 6 under it). */
 static const struct DioramaProp sLilycove[] = {
+    /* The Safari Zone's Pokeblock feeders (11, MB_POKEBLOCK_FEEDER; the object audit of 2026-11-14: they lay
+     * flat): a box half a tile high, its slot and front drawn on top, as the crates. */
+    { PROP(0x310, DECOR, BLOCK, 1, LOWER), .height16 = 8 },
     { PROP(0x250, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2 },
     { PROP(0x251, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2 },
     { PROP(0x252, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2 },
@@ -336,6 +344,11 @@ static const struct DioramaProp sLavaridge[] = {
     { PROP(0x2CF, ROCK, MOUND, 1, LOWER), .height16 = 12, .flags = DIORAMA_PROP_JOINED },
     { PROP(0x30D, ROCK, RELIEF, 1, LOWER), .shadowIndex = 5, .shadowFromRow = 12, .depth = 12 },
     { PROP(0x315, ROCK, MOUND, 1, LOWER), .height16 = 11 },
+    /* The fence by Route 112's and Mt. Chimney's cable car stations: General's
+     * fence (0x149) over Lavaridge's dirt, standing as General's does (the
+     * rules leave its cells out of the mountain's rock: compile_rules.py
+     * NOT_ROCK_METATILES). */
+    { PROP(0x296, FENCE, SLAB, 1, LOWER), .artBottom = 13, .shadowIndex = 7, .shadowFromRow = 12, .depth = 3 },
     /* Not its gym sign (0x29F, 0x2A7): drawn over the gym's corner, it stands
      * with the gym's front (auto_buildings.py's bounds); a prop would leave the
      * corner lying flat under it. */

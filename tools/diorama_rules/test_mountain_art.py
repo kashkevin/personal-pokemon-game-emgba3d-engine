@@ -82,6 +82,27 @@ class MountainArtTests(unittest.TestCase):
         self.assertEqual(detect_layout(disconnected, summaries, 4, 1),
                          frozenset((0, 1, 2)))
 
+    def test_never_leaves_out_only_its_own_cells(self):
+        # Mt. Chimney: a fence drawn over the mountain's dirt between its rock and more rock - the fence is
+        # no rock (`never`), the rock beyond it still is (found through it, as before)
+        def source_pixel(tile, palette=10):
+            return SimpleNamespace(rgba=(2, 2, 2, 255), visible=True,
+                                   source=SimpleNamespace(tile=tile, palette=palette))
+
+        full_seed = tuple(source_pixel(65 + index % 2) for index in range(256))
+        full_edge = tuple(source_pixel(66) for _ in range(256))
+        foreground = tuple(pixel(visible=3 <= index % 16 <= 12)
+                           for index in range(256))
+        summaries = tuple({"resolved": True, "layers": (full, foreground, composed)}
+                          for full, composed in ((full_seed, full_seed),
+                                                 (full_edge, full_edge),
+                                                 (full_edge, full_edge)))
+        cells = ({"behavior": "MB_MOUNTAIN_TOP", "collision": 1},
+                 {"behavior": "MB_NORMAL", "collision": 1}, {"behavior": "MB_NORMAL", "collision": 1})
+        self.assertEqual(validate_layout(cells, summaries, 3, 1), frozenset((0, 1, 2)))
+        self.assertEqual(validate_layout(cells, summaries, 3, 1, never=frozenset((1,))),
+                         frozenset((0, 2)))
+
     def test_mass_takes_the_blocked_rock_round_a_mountain_in_its_palette(self):
         # Route 106: the mountain's MB_MOUNTAIN_TOP rock, then its face and edges
         # (MB_NORMAL, the same palette, other tiles) - one mass; a cell in another
