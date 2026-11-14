@@ -85,6 +85,9 @@ static void ParseCameras(const char *spec)
             *c = (struct GeoCamera){"a", 42.0f, 33.0f, {11.5f, 9.0f, 10.5f}};
         else if (strcmp(token, "d") == 0)
             *c = (struct GeoCamera){"d", 52.0f, 20.0f, {24.0f, 15.0f, 18.0f}};
+        else if (token[0] == 'c' && atoi(token + 1) > 0)
+            /* the adventure camera's framing at another pitch (an object's sides and thickness from low down) */
+            *c = (struct GeoCamera){"c", (float)atoi(token + 1), 33.0f, {11.5f, 9.0f, 10.5f}};
         else if ((token[0] == 's' || token[0] == 'w') && atoi(token + 1) > 0)
         {
             float extent = token[0] == 's' ? 34.0f : 24.0f;
