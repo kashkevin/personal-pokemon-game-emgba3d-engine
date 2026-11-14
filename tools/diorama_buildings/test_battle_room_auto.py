@@ -502,3 +502,51 @@ class BerthTests(unittest.TestCase):
         bin_ = names["edge_28_13"]
         self.assertEqual(bin_["shape"], [(448, 208, 464, 224)])
         self.assertEqual(bin_["height"], 8)
+
+
+class TrickHouseWallTests(unittest.TestCase):
+    """The object audit of 2026-11-14 (class 5): the Trick House's puzzle rooms draw their back wall on two rows;
+    the maze's partitions that meet it were read as one run with it and stood 48 rows tall on the partition's foot,
+    up to ten cells into the room. WALL_ROWS: the wall stands its two rows, the partition's cells are a thing's, as
+    the maze's other partitions are."""
+
+    LAYOUTS = ["LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE%d" % n for n in (1, 2, 3, 4, 6, 7)]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.read = {lid: bra.analyse(lid) for lid in cls.LAYOUTS}
+
+    def test_the_auto_rooms_with_the_tileset(self):
+        import battle_room_specs
+        rooms = [lid for lid in battle_room_specs.AUTO_ROOMS
+                 if vb.LayoutArt(lid).secondary in bra.WALL_ROWS]
+        self.assertEqual(sorted(rooms), sorted(self.LAYOUTS))
+
+    def test_each_back_wall_stands_its_two_rows(self):
+        for lid in self.LAYOUTS:
+            ground, pieces, notes = self.read[lid]
+            walls = [pc for pc in pieces if pc["name"].startswith("wall_")]
+            with self.subTest(room=lid):
+                self.assertTrue(walls)
+                for pc in walls:
+                    x0, y0, x1, y1 = pc["shape"][0]
+                    self.assertEqual((y0, y1, pc["height"], pc["foot"]), (0, 32, 32, 32), pc["name"])
+                # nothing in the room stands taller than its wall
+                self.assertLessEqual(max(pc["height"] for pc in pieces), 32)
+
+    def test_a_partition_at_the_wall_stands_as_the_maze_does(self):
+        # puzzle 6's column 12: a partition from the wall down to row 9, before a 48-row slab
+        ground, pieces, notes = self.read["LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE6"]
+        pc = {p["name"]: p for p in pieces}["thing_12_2"]
+        cells = sorted({(x0 // 16, y0 // 16) for (x0, y0, x1, y1) in pc["shape"]})
+        self.assertEqual(cells, [(12, y) for y in range(2, 10)])
+        self.assertEqual(pc["height"], bra.THING)
+
+    def test_puzzle_1_stands_on_its_cells_own_floor(self):
+        # its tatami shaded along a partition's foot has the partitions' outline for its top row: the
+        # outline's corners in a partition's cell are that floor's, so under the partition it is laid
+        # (UNDER_OWN), not the plain tatami
+        spec = bra.auto_room_spec("auto_route110_trick_house_puzzle1", "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1")
+        self.assertEqual(spec["interior"]["under"], "own")
+        spec = bra.auto_room_spec("auto_route110_trick_house_puzzle2", "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE2")
+        self.assertIsNone(spec["interior"]["under"])

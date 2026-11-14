@@ -100,6 +100,25 @@ APART = {
     "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_1F": {(10, 6), (13, 6)},
 }
 
+# Back walls of a known depth, by the secondary tileset: a wall run from the room's top deeper than
+# this many rows is the wall and what stands in front of it. The Trick House's puzzle rooms draw
+# their back wall on two rows; the maze's partitions that meet it ran on in the same column, read as
+# one run with it, and stood 48 rows tall (the wall's MAX_WALL) on the partition's foot - up to ten
+# cells into the room, a slab twice the maze's height rising from the wall (the object audit of
+# 2026-11-14, class 5: "partitions bending up into tall slabs at the back wall"). The wall stands
+# its two rows; the partition's cells are a thing's, as the maze's other partitions are.
+WALL_ROWS = {
+    "gTileset_TrickHousePuzzle": 2,
+}
+
+# Rooms whose pieces stand on their cells' own drawing (`under` "own", as the Battle Factory's hall:
+# KNOWN_ISSUES MS-227), not on the room's commonest floor. Trick House puzzle 1's floor is two
+# metatiles, the tatami and the tatami shaded along a partition's foot, whose top row is the
+# partitions' outline: the outline's corner pixels in a partition's cell are that floor's own, so
+# floor, and under the partition (WALL_ROWS made those cells a partition's) the tatami laid there
+# instead showed 15 grey pixels at 45 degrees.
+UNDER_OWN = {"LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1"}
+
 # Ship berths modelled by hand, by their metatiles (the secondary tileset's): the InsideShip tileset's
 # bed in its alcove, two cells by two under the back wall, its side board on the west or (the
 # second) the east - the S.S. Tidal's cabins and the Abandoned Ship's. The reader took the berth's
@@ -399,6 +418,17 @@ def analyse(layout_id, taken=(), drop=()):
                 wall_cells.update((c, yy) for yy in range(*run))
             notes.append("door in the wall: columns %d-%d, rows %d-%d" % (x, end, run[0], run[1] - 1))
         x = end + 1
+    # a back wall of a known depth (WALL_ROWS): what its columns' runs hold past it is a thing's
+    wall_rows = WALL_ROWS.get(L.secondary)
+    if wall_rows:
+        for (ya, yb), cols in list(walls.items()):
+            if yb - ya <= wall_rows:
+                continue
+            walls.setdefault((ya, ya + wall_rows), []).extend(cols)
+            del walls[(ya, yb)]
+            wall_cells.difference_update((c, yy) for c in cols for yy in range(ya + wall_rows, yb))
+            notes.append("the wall's %d rows: columns %s, rows %d-%d a thing's"
+                         % (wall_rows, ",".join(map(str, sorted(cols))), ya + wall_rows, yb - 1))
     # berths modelled by hand (BERTH): the wall over each stands to the row its foot is drawn on
     hand_berths = berths(L, walls)
     for (bx, by, runs) in hand_berths:
@@ -649,5 +679,6 @@ def auto_room_spec(name, layout_id, drop=(), reuse_in=None):
         return None
     return {"name": name, "auto": True, "notes": notes,
             "interior": {"layout": layout_id, "ground": ground,
+                         "under": "own" if layout_id in UNDER_OWN else None,
                          "reuse_in": None if reuse_in is None else frozenset(reuse_in),
                          "pieces": lambda layout, taken: analyse(layout_id, taken, drop)[1]}}

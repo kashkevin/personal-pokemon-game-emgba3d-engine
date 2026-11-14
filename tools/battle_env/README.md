@@ -109,7 +109,14 @@ were one run four rows deep and the bed, drawn from above, stood painted upright
 the wall's face. The wall over it stands to the row its foot is drawn on, as the wall beside it,
 and the berth is a bed 8 rows tall in front of it, its top the drawing from the wall's foot to
 its frame; a thing in the same run past its foot (a bin) stands on its own. Each room reads its
-own berths (a berth is no other room's to lend: `own_shell`).
+own berths (a berth is no other room's to lend: `own_shell`). Where a tileset draws its back wall
+on a known number of rows (`battle_room_auto.WALL_ROWS`: the Trick House's puzzle rooms, two), a
+run from the room's top deeper than that is the wall and what stands in front of it: the maze's
+partitions that meet the wall were read as one run with it and stood 48 rows tall, up to ten
+cells into the room; the wall stands its two rows and the partitions are things, as the maze's
+others are. A room whose second floor metatile shares a piece's corner pixels stands its pieces on
+their cells' own drawing (`UNDER_OWN`: Trick House puzzle 1, whose tatami shaded along a
+partition's foot has the partitions' outline for its top row).
 
 What the proof cannot see: it compares the picture the GBA's camera sees. A piece that gives
 back its drawing exactly can still be wrong from the battle camera's angle - the survey's
