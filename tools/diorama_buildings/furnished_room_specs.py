@@ -836,6 +836,74 @@ def oceanic_museum_1f():
     ])
 
 
+# ── The Battle Tower's multi partner room ─────────────────────────────────
+#
+# 21 x 15 cells, no model until the object audit of 2026-11-14. The back wall (rows 0-32, the lift's
+# door painted on it as the corridors'), two benches against the room's east edge (x 320-336: 8
+# rows), four potted plants at the front corners (cards); the floor's darker strips are the floor's.
+
+def tower_multi_partner_room():
+    facet, own_shell, piece = _helpers()
+    side = (96, 0, 112, 32)
+    return own_shell([piece("plant_%d" % x0, [(x0, 208, x0 + 16, 240)], 30, leave=TOWER_FLOOR, card=True)
+                      for x0 in (0, 16, 304, 320)] + [
+        piece("bench_n", [(320, 64, 336, 112)], 8, leave=TOWER_FLOOR),
+        piece("bench_s", [(320, 144, 336, 192)], 8, leave=TOWER_FLOOR),
+        piece("wall", [(0, 0, 336, 32)], 32, fill=16, side=side),
+        piece("side_w", [], 32, side=side, walls=[((0, 240), (0, 32))]),
+        piece("side_e", [], 32, side=side, walls=[((336, 32), (336, 240))]),
+    ])
+
+
+# ── The Battle Arena's corridor ───────────────────────────────────────────
+#
+# 18 x 14 cells, no model until the object audit of 2026-11-14 (V: its island of shoji screens lay
+# flat round the player's path). The player walks round a T of screens: its front (x 48-240, rows
+# 128-192: 64 rows, the screens and their frames) under a black top, the T's stem between the two
+# back walls (x 96-192) black up to the room's back. Two blocks of 64 rows: the stem's top runs back
+# to the room's back (z 0), the wings' to the blocked cells' back (z 80) - the black cells are the
+# island, not floor. The back walls either side (rows 0-48, 48 rows of screens), side walls, four
+# small potted plants in the corners (cards); the green mats and the island's shadow are the floor's.
+
+ARENA_FLOOR = ("decd83", "d5b46a", "eee6a4")
+ARENA_WALL_SIDE = (16, 0, 32, 48)
+ARENA_ISLAND_SIDE = (112, 128, 128, 192)
+
+
+def arena_corridor():
+    facet, own_shell, piece = _helpers()
+    plants = [piece("plant_%d_%d" % (x0, z0), [(x0, z0, x0 + 16, z0 + 16)], 15, leave=ARENA_FLOOR, card=True)
+              for x0 in (0, 272) for z0 in (48, 208)]
+    return own_shell(plants + [
+        piece("block_stem", [(96, 0, 192, 192)], 64, back=0, side=ARENA_ISLAND_SIDE),
+        piece("block_wings", [(48, 80, 96, 192), (192, 80, 240, 192)], 64, back=80, side=ARENA_ISLAND_SIDE),
+        piece("wall_w", [(0, 0, 96, 48)], 48, fill=16, side=ARENA_WALL_SIDE),
+        piece("wall_e", [(192, 0, 288, 48)], 48, fill=16, side=ARENA_WALL_SIDE),
+        piece("side_w", [], 48, side=ARENA_WALL_SIDE, walls=[((0, 224), (0, 48))]),
+        piece("side_e", [], 48, side=ARENA_WALL_SIDE, walls=[((288, 48), (288, 224))]),
+    ])
+
+
+# ── The Battle Dome's corridor ────────────────────────────────────────────
+#
+# 48 x 7 cells, no model until the object audit of 2026-11-14: its back wall (rows 0-64: the dome's
+# windows, their white beams and sills over its panels, their doors and red base band, all painted
+# on it - the attendant walks the player along) lay drawn on the floor. The wall stands in six
+# pieces, one to each 8-cell repeat of its pattern; side walls, a door's plain jamb for their face;
+# the floor and its mat are the floor's.
+
+DOME_WALL_SIDE = (73, 0, 77, 64)
+
+
+def dome_corridor():
+    facet, own_shell, piece = _helpers()
+    return own_shell([piece("wall_%d" % n, [(n * 128, 0, n * 128 + 128, 64)], 64, fill=16, side=DOME_WALL_SIDE)
+                      for n in range(6)] + [
+        piece("side_w", [], 64, side=DOME_WALL_SIDE, walls=[((0, 112), (0, 64))]),
+        piece("side_e", [], 64, side=DOME_WALL_SIDE, walls=[((768, 64), (768, 112))]),
+    ])
+
+
 # ── Lilycove's Contest Lobby ───────────────────────────────────────────────
 #
 # 31 x 12 cells, no model until the object audit of 2026-11-14. The back wall (rows 0-32: a red
@@ -1518,6 +1586,21 @@ def furnished_room_specs():
             "name": "oceanic_museum_1f",
             "interior": {"layout": "LAYOUT_SLATEPORT_CITY_OCEANIC_MUSEUM_1F", "ground": [0x201, 0x202],
                          "under": "own", "reuse_in": frozenset(), "pieces": oceanic_museum_1f()},
+        },
+        {
+            "name": "tower_multi_partner_room",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_TOWER_MULTI_PARTNER_ROOM", "ground": [0x200],
+                         "under": "own", "reuse_in": frozenset(), "pieces": tower_multi_partner_room()},
+        },
+        {
+            "name": "arena_corridor",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_ARENA_CORRIDOR", "ground": [0x201],
+                         "under": "own", "reuse_in": frozenset(), "pieces": arena_corridor()},
+        },
+        {
+            "name": "dome_corridor",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_DOME_CORRIDOR", "ground": [0x340, 0x341],
+                         "under": "own", "reuse_in": frozenset(), "pieces": dome_corridor()},
         },
         {
             "name": "safari_rest_house",
