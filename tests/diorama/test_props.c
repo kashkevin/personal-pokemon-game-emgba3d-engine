@@ -34,6 +34,10 @@ static void Check(bool condition, const char *expression, int line)
 #define LAYOUT_DEWFORD_TOWN 12
 #define LAYOUT_LAVARIDGE_TOWN 13
 #define LAYOUT_ROUTE110 26
+#define LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST 265
+#define LAYOUT_ROUTE124 40
+#define LAYOUT_ROUTE126 42
+#define LAYOUT_BATTLE_FRONTIER_OUTSIDE_EAST 345
 
 #define GRASS 0x001
 #define FLOWERS 0x004
@@ -464,6 +468,127 @@ static void TestLampAndFences(void)
 #define STALL_FRONT_MIDDLE 0x2F9
 #define STALL_POST_LEFT 0x23D
 
+/* The Battle Frontier's stone arch: 5 x 5 cells, the pillars' feet its last row (map row 60 here). Every cell
+ * of it stands on one plane, the feet row's, 5 pixels south of its middle; each lifted onto the cell under it
+ * in the art (the feet stand 13 rows); the opening under the arch (0x214, nothing drawn) is the plaza's. */
+static void TestFrontierArch(void)
+{
+    static const uint16_t arch[5][5] = {
+        { 0, 0x23C, 0x23D, 0x23E, 0 },
+        { 0x20E, 0x20B, 0x20C, 0x20D, 0x20F },
+        { 0x216, 0x213, 0x214, 0x215, 0x217 },
+        { 0x21E, 0, 0, 0, 0x21E },
+        { 0x226, 0, 0, 0, 0x226 },
+    };
+    bool complete;
+    unsigned count;
+    unsigned i;
+    int x;
+    int y;
+
+    MakeSnapshot(LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST, 0.5f);
+    for (y = 0; y < 5; y++)
+        for (x = 0; x < 5; x++)
+            if (arch[y][x] != 0)
+                Put(58 + x, 56 + y, arch[y][x]);
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 64, &complete);
+    CHECK(count == 16 && complete);
+    for (i = 0; i < count; i++)
+    {
+        const struct DioramaCellSnapshot *cell = &sSnapshot.cells[sInstances[i].cellIndex];
+        int up = 60 - cell->mapY;
+
+        CHECK(sInstances[i].prop->metatileId != 0x214);
+        CHECK(Near(sInstances[i].z, -(60.0f + 5.0f / 16.0f)) && Near(sInstances[i].x, (float)cell->mapX));
+        CHECK(Near(sInstances[i].y, 0.5f + (up == 0 ? 0.0f : (16 * up - 3) / 16.0f)));
+        CHECK(sInstances[i].prop->artBottom == (up == 0 ? 13 : 0) && sInstances[i].prop->depth == 8);
+    }
+    /* On another tileset these ids are something else. */
+    CHECK(DioramaProps_Find(LAYOUT_LITTLEROOT_TOWN, 0x23C) == NULL);
+}
+
+/* The Battle Arena's gate: 7 x 5 cells, the posts' feet its last row (map row 60 here); the same, on one plane
+ * 2 pixels south of the feet row's middle, the feet standing 11 rows; the path through it (General's) is left. */
+static void TestArenaGate(void)
+{
+    static const uint16_t gate[5][7] = {
+        { 0x268, 0x269, 0x269, 0x269, 0x269, 0x269, 0x26C },
+        { 0x270, 0x271, 0x272, 0x272, 0x272, 0x273, 0x274 },
+        { 0x27B, 0x27C, 0x263, 0x264, 0x265, 0x27B, 0x27C },
+        { 0x278, 0x279, 0x1D8, 0x1D9, 0x1DA, 0x278, 0x279 },
+        { 0x26A, 0x26B, 0x362, 0x1D9, 0x363, 0x26A, 0x26B },
+    };
+    bool complete;
+    unsigned count;
+    unsigned i;
+    int x;
+    int y;
+
+    MakeSnapshot(LAYOUT_BATTLE_FRONTIER_OUTSIDE_EAST, 0.0f);
+    for (y = 0; y < 5; y++)
+        for (x = 0; x < 7; x++)
+            Put(57 + x, 56 + y, gate[y][x]);
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 64, &complete);
+    CHECK(count == 7 + 7 + 7 + 4 + 6 && complete);
+    for (i = 0; i < count; i++)
+    {
+        const struct DioramaCellSnapshot *cell = &sSnapshot.cells[sInstances[i].cellIndex];
+        int up = 60 - cell->mapY;
+
+        CHECK(sInstances[i].prop->metatileId >= 0x200);
+        CHECK(Near(sInstances[i].z, -(60.0f + 2.0f / 16.0f)));
+        CHECK(Near(sInstances[i].y, up == 0 ? 0.0f : (16 * up - 5) / 16.0f));
+        CHECK(sInstances[i].prop->artBottom == (up == 0 ? 11 : 0));
+    }
+}
+
+/* The sea rocks' two halves (Mossdeep's tileset): a rock two cells wide stands, its west half beside its east;
+ * the same halves at a formation's corners, a cell of its top between them, stand neither (the object audit of
+ * 2026-11-14: thin cards there), and their cells keep their own drawing. */
+static void TestSeaRockHalves(void)
+{
+    bool complete;
+    unsigned count;
+    uint16_t metatile;
+    uint8_t layer;
+
+    MakeSnapshot(LAYOUT_ROUTE124, 0.0f);
+    Put(58, 60, 0x33B);
+    Put(59, 60, 0x33D);
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete);
+    CHECK(count == 2 && complete);
+    CHECK(DioramaProps_ForCell(&sSnapshot, &sSnapshot.cells[CellIndex(58, 60)]) != NULL);
+    CHECK(DioramaProps_GroundMaterial(&sSnapshot, CellIndex(59, 60), &metatile, &layer));
+    /* A formation's top: corner, top, corner. */
+    MakeSnapshot(LAYOUT_ROUTE124, 0.0f);
+    Put(58, 60, 0x33B);
+    Put(59, 60, 0x33C);
+    Put(60, 60, 0x33D);
+    CHECK(DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete) == 0);
+    CHECK(DioramaProps_ForCell(&sSnapshot, &sSnapshot.cells[CellIndex(58, 60)]) == NULL);
+    CHECK(DioramaProps_ForCell(&sSnapshot, &sSnapshot.cells[CellIndex(60, 60)]) == NULL);
+    CHECK(!DioramaProps_GroundMaterial(&sSnapshot, CellIndex(58, 60), &metatile, &layer));
+    CHECK(!DioramaProps_GroundMaterial(&sSnapshot, CellIndex(60, 60), &metatile, &layer));
+    /* The east half alone, its west the water; the west half alone, its east the water. */
+    MakeSnapshot(LAYOUT_ROUTE124, 0.0f);
+    Put(58, 60, 0x33D);
+    Put(62, 60, 0x33B);
+    CHECK(DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete) == 0);
+    /* Two rocks side by side: each half has its other half beside it. */
+    MakeSnapshot(LAYOUT_ROUTE124, 0.0f);
+    Put(58, 60, 0x33B);
+    Put(59, 60, 0x33D);
+    Put(60, 60, 0x33B);
+    Put(61, 60, 0x33D);
+    CHECK(DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete) == 4);
+    /* Route 126's pale rocks the same; a half at the grid's edge, its neighbour outside, stands as before. */
+    MakeSnapshot(LAYOUT_ROUTE126, 0.0f);
+    Put(58, 60, 0x338);
+    Put(59, 60, 0x33A);
+    Put(sSnapshot.gridOriginX + DIORAMA_GRID_WIDTH - 1, 60, 0x338);
+    CHECK(DioramaProps_Build(&sSnapshot, sResolved, sInstances, 16, &complete) == 3);
+}
+
 static void TestStall(void)
 {
     bool complete;
@@ -554,6 +679,9 @@ int main(void)
     TestBuild();
     TestTallGrass();
     TestLampAndFences();
+    TestFrontierArch();
+    TestArenaGate();
+    TestSeaRockHalves();
     TestStall();
     TestGround();
     printf("test_props: %d checks passed\n", sChecks);

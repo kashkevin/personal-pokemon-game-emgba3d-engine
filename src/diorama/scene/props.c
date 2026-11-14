@@ -342,8 +342,15 @@ static const struct DioramaProp sLavaridge[] = {
 };
 
 /* Mossdeep and the seas round it: tall rocks standing in the water, each two
- * cells wide (a relief joined across the two). */
-#define SEA_ROCK(id) { PROP(id, ROCK, RELIEF, 1, LOWER), .depth = 14, .flags = DIORAMA_PROP_JOINED }
+ * cells wide (a relief joined across the two), its west half and its east.
+ * The same art tops the larger formations' corners, a cell of the formation's
+ * own top beside it (Routes 124-129, the object audit of 2026-11-14: half a
+ * rock stood there as a thin card): each half stands only beside the other
+ * (PAIR_EAST, PAIR_WEST). Routes 124 and 125 use 0x202 and 0x203 only there. */
+#define SEA_ROCK_WEST(id) { PROP(id, ROCK, RELIEF, 1, LOWER), .depth = 14, \
+                            .flags = DIORAMA_PROP_JOINED | DIORAMA_PROP_PAIR_EAST }
+#define SEA_ROCK_EAST(id) { PROP(id, ROCK, RELIEF, 1, LOWER), .depth = 14, \
+                            .flags = DIORAMA_PROP_JOINED | DIORAMA_PROP_PAIR_WEST }
 /* Mossdeep City's four large round trees (MS-172; no other map draws these cells): three cells wide, the crown
  * two rows and the top of the third, the trunk under it. They lay flat among the city's solid trees; they stand
  * as Birth Island's do (sDewford below): each crown cell a heap of leaves lifted on the trunk, the few leaves at
@@ -356,12 +363,9 @@ static const struct DioramaProp sLavaridge[] = {
 #define MOSSDEEP_TRUNK(id) { PROP(id, BUSH, SLAB, 1, LOWER), .artBottom = 12, .shadowIndex = 4, \
                              .shadowFromRow = 12, .depth = 3, .height16 = 21, .offsetZ = -16 }
 static const struct DioramaProp sMossdeep[] = {
-    SEA_ROCK(0x202),
-    SEA_ROCK(0x203),
-    SEA_ROCK(0x338),
-    SEA_ROCK(0x33A),
-    SEA_ROCK(0x33B),
-    SEA_ROCK(0x33D),
+    SEA_ROCK_WEST(0x202), SEA_ROCK_EAST(0x203),
+    SEA_ROCK_WEST(0x338), SEA_ROCK_EAST(0x33A),
+    SEA_ROCK_WEST(0x33B), SEA_ROCK_EAST(0x33D),
     /* the crown's top row: by the sea (2F2-2F4), by the rock (2FA-2FB, with 304), on grass (302-304) */
     MOSSDEEP_CROWN_SIDE(0x2F2), MOSSDEEP_CROWN(0x2F3), MOSSDEEP_CROWN_SIDE(0x2F4),
     MOSSDEEP_CROWN_SIDE(0x2FA), MOSSDEEP_CROWN(0x2FB),
@@ -442,7 +446,21 @@ static const struct DioramaProp sTrainerHill[] = {
  * along its terraces, all blocking the way, the same bush as Slateport's
  * (0x243). Added by the battle environments' work (docs/battle-environments.md):
  * flat on the terrace behind the battles by the Pokemon Center. */
+/* The Battle Arena's gate, 7 x 5 cells over the path to the Arena (the object audit of 2026-11-14: it lay on
+ * the grass): its tiled roof the first two rows, the posts and white screens under it, the posts' feet the
+ * last row. As the Frontier's arches (FRONTIER_ARCH): its art, the upper layer over the grass and the path,
+ * stands on the feet row - the feet their first 11 rows, the rest lifted onto the cell under it in the art,
+ * the gate's front where the posts' feet are drawn (2 pixels south of the row's middle). The opening's path
+ * cells (General's) draw nothing over it. */
+#define ARENA_GATE_FOOT(id) { PROP(id, DECOR, SLAB, 1, LOWER), .artBottom = 11, .depth = 8, .offsetZ = 2 }
+#define ARENA_GATE(id, up) { PROP(id, DECOR, SLAB, 1, LOWER), .depth = 8, .offsetZ = 16 * (up) + 2, \
+                             .lift16 = 16 * (up) - 5 }
 static const struct DioramaProp sBattleFrontierOutsideEast[] = {
+    ARENA_GATE(0x268, 4), ARENA_GATE(0x269, 4), ARENA_GATE(0x26C, 4),
+    ARENA_GATE(0x270, 3), ARENA_GATE(0x271, 3), ARENA_GATE(0x272, 3), ARENA_GATE(0x273, 3), ARENA_GATE(0x274, 3),
+    ARENA_GATE(0x27B, 2), ARENA_GATE(0x27C, 2), ARENA_GATE(0x263, 2), ARENA_GATE(0x264, 2), ARENA_GATE(0x265, 2),
+    ARENA_GATE(0x278, 1), ARENA_GATE(0x279, 1),
+    ARENA_GATE_FOOT(0x26A), ARENA_GATE_FOOT(0x26B), ARENA_GATE_FOOT(0x362), ARENA_GATE_FOOT(0x363),
     { PROP(0x202, BUSH, MOUND, 1, LOWER), .height16 = 11 },
     { PROP(0x203, BUSH, MOUND, 1, LOWER), .height16 = 11 },
     /* the low white walls round its plazas, the sand and the pools (the General tileset's stones) */
@@ -456,7 +474,21 @@ static const struct DioramaProp sBattleFrontierOutsideEast[] = {
 
 /* The Battle Frontier's west half: its low white walls (the General tileset's stones) round the plazas,
  * the pools and the paths. */
+/* The three stone arches over the path to the Battle Frontier's gate, 5 x 5 cells each, the pillars' feet
+ * the last row (the object audit of 2026-11-14: they lay on the plaza as a U). The arch's art, the upper
+ * layer over the plaza, stands on its foot row: each cell `up` rows north of it moved as many rows south and
+ * lifted onto the cell under it in the art. The feet stand their first 13 rows; the base's lowest three are
+ * the lower layer's, left on the ground, and the arch's front stands where they begin (5 pixels south of the
+ * row's middle), 8 pixels thick. Its metatiles are this arch on every map using them (this one). */
+#define FRONTIER_ARCH_FOOT(id) { PROP(id, DECOR, SLAB, 1, LOWER), .artBottom = 13, .depth = 8, .offsetZ = 5 }
+#define FRONTIER_ARCH(id, up) { PROP(id, DECOR, SLAB, 1, LOWER), .depth = 8, .offsetZ = 16 * (up) + 5, \
+                                .lift16 = 16 * (up) - 3 }
 static const struct DioramaProp sBattleFrontierOutsideWest[] = {
+    FRONTIER_ARCH(0x23C, 4), FRONTIER_ARCH(0x23D, 4), FRONTIER_ARCH(0x23E, 4),
+    FRONTIER_ARCH(0x20E, 3), FRONTIER_ARCH(0x20B, 3), FRONTIER_ARCH(0x20C, 3), FRONTIER_ARCH(0x20D, 3),
+    FRONTIER_ARCH(0x20F, 3),
+    FRONTIER_ARCH(0x216, 2), FRONTIER_ARCH(0x213, 2), FRONTIER_ARCH(0x215, 2), FRONTIER_ARCH(0x217, 2),
+    FRONTIER_ARCH(0x21E, 1), FRONTIER_ARCH_FOOT(0x226),
     WHITE_WALL(0x21B), WHITE_WALL(0x21C), WHITE_WALL(0x21D), WHITE_WALL(0x22A), WHITE_WALL(0x22B),
     WHITE_WALL(0x240), WHITE_WALL(0x241), WHITE_WALL(0x242), WHITE_WALL(0x243), WHITE_WALL(0x24A),
     WHITE_WALL(0x251), WHITE_WALL(0x252), WHITE_WALL(0x257), WHITE_WALL(0x259), WHITE_WALL(0x25A),
@@ -694,6 +726,24 @@ static uint16_t CellLayout(const struct DioramaSceneSnapshot *snapshot,
     return snapshot->mapLayoutId;
 }
 
+static const struct DioramaCellSnapshot *GridCell(const struct DioramaSceneSnapshot *snapshot,
+                                                  int mapX, int mapY, int *index);
+
+/* A PAIR_EAST/PAIR_WEST half's other half: the cell `dx` beside it holds a prop flagged `flag` (its
+ * own metatile's entry: no pairing of its own asked). A cell outside the grid is taken to hold it, as
+ * before pairing: the grid's edge does not change what stands. */
+static bool HasOtherHalf(const struct DioramaSceneSnapshot *snapshot, const struct DioramaCellSnapshot *cell,
+                         int dx, uint8_t flag)
+{
+    const struct DioramaCellSnapshot *other = GridCell(snapshot, cell->mapX + dx, cell->mapY, NULL);
+    const struct DioramaProp *prop;
+
+    if (other == NULL)
+        return true;
+    prop = DioramaProps_Find(CellLayout(snapshot, other), other->metatileId);
+    return prop != NULL && (prop->flags & flag);
+}
+
 const struct DioramaProp *DioramaProps_ForCell(const struct DioramaSceneSnapshot *snapshot,
                                                const struct DioramaCellSnapshot *cell)
 {
@@ -703,6 +753,12 @@ const struct DioramaProp *DioramaProps_ForCell(const struct DioramaSceneSnapshot
         return NULL;
     prop = DioramaProps_Find(CellLayout(snapshot, cell), cell->metatileId);
     if (prop != NULL && (prop->flags & DIORAMA_PROP_BLOCKED) && cell->collision == 0)
+        return NULL;
+    if (prop != NULL && (prop->flags & DIORAMA_PROP_PAIR_EAST)
+     && !HasOtherHalf(snapshot, cell, 1, DIORAMA_PROP_PAIR_WEST))
+        return NULL;
+    if (prop != NULL && (prop->flags & DIORAMA_PROP_PAIR_WEST)
+     && !HasOtherHalf(snapshot, cell, -1, DIORAMA_PROP_PAIR_EAST))
         return NULL;
     return prop;
 }

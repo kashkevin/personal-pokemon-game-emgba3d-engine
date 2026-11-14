@@ -78,6 +78,11 @@ enum DioramaPropFlags
     DIORAMA_PROP_JOINED = 1 << 2, /* a mound going on past the cell's edges (a rock of 2 x 2
                                    * cells): its rim is only where its art ends inside */
     DIORAMA_PROP_BLOCKED = 1 << 3, /* only where the cell is blocked (a wall: walked, its art is paint) */
+    /* One half of an object two cells wide (a rock's top): only beside its other half, the cell east
+     * (PAIR_EAST) or west (PAIR_WEST) holding a prop flagged the other way. The same art at a larger
+     * formation's corner, beside a cell of its own top, is the formation's. */
+    DIORAMA_PROP_PAIR_EAST = 1 << 4,
+    DIORAMA_PROP_PAIR_WEST = 1 << 5,
 };
 
 #define DIORAMA_PROP_OWN_ART 0
