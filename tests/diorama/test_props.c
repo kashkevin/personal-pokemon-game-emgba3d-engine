@@ -26,9 +26,13 @@ static void Check(bool condition, const char *expression, int line)
 
 /* Layout ids (include/constants/layouts.h): General + Rustboro, General +
  * Petalburg. */
+#define LAYOUT_PETALBURG_CITY 1
 #define LAYOUT_SLATEPORT_CITY 2
 #define LAYOUT_RUSTBORO_CITY 4
+#define LAYOUT_FORTREE_CITY 5
 #define LAYOUT_LITTLEROOT_TOWN 10
+#define LAYOUT_DEWFORD_TOWN 12
+#define LAYOUT_LAVARIDGE_TOWN 13
 #define LAYOUT_ROUTE110 26
 
 #define GRASS 0x001
@@ -129,6 +133,32 @@ static void TestFind(void)
     prop = DioramaProps_Find(LAYOUT_ROUTE110, 0x045);
     CHECK(prop != NULL && prop->form == DIORAMA_PROP_BLOCK && prop->onlyPalette == 4
        && (prop->flags & DIORAMA_PROP_BLOCKED) && prop->ground == DIORAMA_PROP_GROUND_KEEP);
+    /* The towns' gym signs stand: the top on the board a cell south, the board
+     * with its painted shadow left out - General's (Petalburg's and others')
+     * and three towns' own copies (the object audit of 2026-11-14: Dewford's
+     * and Fortree's lay flat, Rustboro's top behind its standing board).
+     * Lavaridge's stands with its gym's front, over whose corner it is drawn. */
+    {
+        static const struct { uint16_t layout, top, board; } signs[] = {
+            { LAYOUT_PETALBURG_CITY, 0x130, 0x131 }, { LAYOUT_RUSTBORO_CITY, 0x2CC, 0x2D4 },
+            { LAYOUT_DEWFORD_TOWN, 0x208, 0x210 }, { LAYOUT_FORTREE_CITY, 0x255, 0x25D },
+        };
+        unsigned s;
+
+        for (s = 0; s < sizeof(signs) / sizeof(signs[0]); s++)
+        {
+            const struct DioramaProp *top = DioramaProps_Find(signs[s].layout, signs[s].top);
+            const struct DioramaProp *board = DioramaProps_Find(signs[s].layout, signs[s].board);
+
+            CHECK(top != NULL && top->kind == DIORAMA_PROP_KIND_SIGN && top->form == DIORAMA_PROP_SLAB
+               && top->standOn == 1 && top->layer == 1 && top->ground == DIORAMA_PROP_GROUND_LOWER);
+            CHECK(board != NULL && board->kind == DIORAMA_PROP_KIND_SIGN && board->form == DIORAMA_PROP_SLAB
+               && board->standOn == 0 && board->shadowIndex == 6 && board->shadowFromRow == 11
+               && board->depth == top->depth);
+        }
+        CHECK(DioramaProps_Find(LAYOUT_LAVARIDGE_TOWN, 0x29F) == NULL
+           && DioramaProps_Find(LAYOUT_LAVARIDGE_TOWN, 0x2A7) == NULL);
+    }
 }
 
 /* Tile graphics: tile 1 has colour index (x + y) % 16 at each pixel, tile 2

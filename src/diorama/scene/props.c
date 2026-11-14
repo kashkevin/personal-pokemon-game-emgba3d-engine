@@ -40,6 +40,15 @@
 #define WHITE_WALL(id) { PROP(id, FENCE, BLOCK, 0, KEEP), .height16 = 7, .onlyPalette = 3 + 1, \
                          .flags = DIORAMA_PROP_BLOCKED }
 
+/* A gym's sign: its top a cell north of the board and stand, the shadow round
+ * the stand left out. Three towns draw it from their own tileset's copy, the
+ * same art over their own ground (Rustboro, Dewford, Fortree: each copy used
+ * once, as the sign); without those Dewford's and Fortree's lay flat (the
+ * object audit of 2026-11-14) and Rustboro's top lay on the ground behind its
+ * board. Lavaridge's copy is drawn over its gym's corner (sLavaridge). */
+#define GYM_SIGN_TOP(id) { PROP(id, SIGN, SLAB, 1, LOWER), .depth = 2, .standOn = 1 }
+#define GYM_SIGN_BOARD(id) { PROP(id, SIGN, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 11, .depth = 2 }
+
 static const struct DioramaProp sGeneral[] = {
     /* The metal sign (towns, routes): drawn alone on its layer, filling the
      * cell, so the ground under it is its neighbours'. */
@@ -76,10 +85,8 @@ static const struct DioramaProp sGeneral[] = {
     { PROP(0x151, ROCK, MOUND, 1, LOWER), .height16 = 14, .flags = DIORAMA_PROP_JOINED },
     { PROP(0x158, ROCK, MOUND, 1, LOWER), .height16 = 14, .flags = DIORAMA_PROP_JOINED },
     { PROP(0x159, ROCK, MOUND, 1, LOWER), .height16 = 14, .flags = DIORAMA_PROP_JOINED },
-    /* A gym's sign: its top a cell north of the board and stand (Rustboro's
-     * own stand is 0x2D4), the shadow round the stand left out. */
-    { PROP(0x130, SIGN, SLAB, 1, LOWER), .depth = 2, .standOn = 1 },
-    { PROP(0x131, SIGN, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 11, .depth = 2 },
+    /* A gym's sign (GYM_SIGN_TOP above). */
+    GYM_SIGN_TOP(0x130), GYM_SIGN_BOARD(0x131),
     /* The low white walls: on the grass (0x03D-0x04F), on the paving (0x055-0x067). Not the Frontier's
      * half wall, half planter (0x005-0x006): a block hid the planter's bushes. */
     WHITE_WALL(0x03D), WHITE_WALL(0x03E), WHITE_WALL(0x03F), WHITE_WALL(0x045), WHITE_WALL(0x047),
@@ -108,8 +115,8 @@ static const struct DioramaProp sRustboro[] = {
     IRON_FENCE_EW(0x2BE),
     IRON_FENCE_EW(0x2BF),
     IRON_FENCE_NS(0x2C6, -5),
-    /* The gym sign's stand (its top is General's 0x130). */
-    { PROP(0x2D4, SIGN, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 11, .depth = 2 },
+    /* The gym sign: its top (2CC) and its board and stand. */
+    GYM_SIGN_TOP(0x2CC), GYM_SIGN_BOARD(0x2D4),
     IRON_FENCE_NS(0x2DE, -5),
     IRON_FENCE_NS(0x2DF, 4),
     IRON_FENCE_NS(0x2EC, 4),
@@ -329,6 +336,9 @@ static const struct DioramaProp sLavaridge[] = {
     { PROP(0x2CF, ROCK, MOUND, 1, LOWER), .height16 = 12, .flags = DIORAMA_PROP_JOINED },
     { PROP(0x30D, ROCK, RELIEF, 1, LOWER), .shadowIndex = 5, .shadowFromRow = 12, .depth = 12 },
     { PROP(0x315, ROCK, MOUND, 1, LOWER), .height16 = 11 },
+    /* Not its gym sign (0x29F, 0x2A7): drawn over the gym's corner, it stands
+     * with the gym's front (auto_buildings.py's bounds); a prop would leave the
+     * corner lying flat under it. */
 };
 
 /* Mossdeep and the seas round it: tall rocks standing in the water, each two
@@ -509,6 +519,8 @@ static const struct DioramaProp sDewford[] = {
     BIRTH_CROWN_HEM(0x338), BIRTH_TRUNK(0x339), BIRTH_CROWN_HEM(0x33A),
     BIRTH_TRUNK(0x33C), BIRTH_TRUNK(0x33D),
     BIRTH_CROWN_SIDE(0x340), BIRTH_CROWN(0x348),
+    /* Dewford's gym sign. */
+    GYM_SIGN_TOP(0x208), GYM_SIGN_BOARD(0x210),
 };
 
 /* Fortree City's palms (step 16): the fronds over the forest - the middle row's upper layer, three cells - a heap
@@ -523,6 +535,8 @@ static const struct DioramaProp sFortree[] = {
     FORTREE_FROND_TIPS(0x248), FORTREE_FROND_TIPS(0x249), FORTREE_FROND_TIPS(0x24A),
     FORTREE_FRONDS(0x250), FORTREE_FRONDS(0x251), FORTREE_FRONDS(0x252),
     { PROP(0x241, BUSH, SLAB, 0, NEIGHBOUR), .depth = 4, .height16 = 18 },
+    /* Fortree's gym sign. */
+    GYM_SIGN_TOP(0x255), GYM_SIGN_BOARD(0x25D),
 };
 
 /* Caves: heaps of rocks on the floor. */
