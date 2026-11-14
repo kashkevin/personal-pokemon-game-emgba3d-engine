@@ -1484,9 +1484,10 @@ RIDGE_LAYOUTS: frozenset[str] = frozenset()
 # of 2026-11-09).
 SCENERY_COURSES: dict[str, tuple[tuple[int, int], ...]] = {
     "LAYOUT_SAFARI_ZONE_SOUTH": tuple((x, 2) for x in range(18, 26)) + ((35, 7), (36, 7)),
-    # Navel Rock's outside (KNOWN_ISSUES MS-249): five of General's terrace course pieces in the west side of the rock
-    # in the middle of its sand (HAND_LEVELS'), which the solver read as the rim of a terrace a level under the rest.
-    "LAYOUT_NAVEL_ROCK_EXTERIOR": ((7, 7), (7, 8), (7, 9), (8, 9), (8, 10)),
+    # Navel Rock's outside (KNOWN_ISSUES MS-249): six of General's terrace course pieces in the west side of the rock
+    # in the middle of its sand (HAND_LEVELS'): five the solver read as the rim of a terrace a level under the rest,
+    # and the inner corner of that side's drawing, (9, 8), which stood a tile over the rock's top round it, a block.
+    "LAYOUT_NAVEL_ROCK_EXTERIOR": ((7, 7), (7, 8), (7, 9), (8, 9), (8, 10), (9, 8)),
 }
 # The Safari Zone's north-east (the owner's choice of 2026-11-01: "Real terraces + slope at edge"): its terraces
 # step down three levels from the north to its south edge, where the south-east meets it at the level the rest of
@@ -1622,7 +1623,7 @@ HAND_LEVELS: dict[str, dict] = {
     # rock in the middle, the sand round that rock - and the rim's faces rising over the sand. The solver read the
     # rock's west side (SCENERY_COURSES') as the rim of a terrace and laid the courtyard and a path by it a level
     # under the pier, the rest on the pier's level: the player stepped a level down off the stairs. Inside the rim
-    # (5-15, 3-12) the sand, the rock and the rim stand a level over the pier, the stairs climbing to them; the five
+    # (5-15, 3-12) the sand, the rock and the rim stand a level over the pier, the stairs climbing to them; the six
     # pieces stay the faces the solver makes of scenery (course_ridges), their tops on the sand's level. A first try
     # (2026-11-13) laid those pieces with the rest of the rock: they stood as a block a tile high and flat squares.
     # Route 119's grass bank (MOUNTAIN_LEVELS' "more_tops", a level over the rock plateau, KNOWN_ISSUES MS-247) took
@@ -1640,8 +1641,9 @@ HAND_LEVELS: dict[str, dict] = {
     },
     "LAYOUT_NAVEL_ROCK_EXTERIOR": {
         "floors": (((5, 3, 15, 12), 16),),
-        "banks": (((5, 3, 15, 6), 16), ((5, 7, 6, 8), 16), ((8, 7, 15, 8), 16), ((5, 9, 6, 9), 16),
-                  ((9, 9, 15, 9), 16), ((5, 10, 7, 10), 16), ((9, 10, 15, 10), 16), ((5, 11, 15, 12), 16)),
+        "banks": (((5, 3, 15, 6), 16), ((5, 7, 6, 8), 16), ((8, 7, 15, 7), 16), ((8, 8, 8, 8), 16),
+                  ((10, 8, 15, 8), 16), ((5, 9, 6, 9), 16), ((9, 9, 15, 9), 16), ((5, 10, 7, 10), 16),
+                  ((9, 10, 15, 10), 16), ((5, 11, 15, 12), 16)),
         "slopes": (((9, 13, 11, 13), "n", 0, 16),),
     },
 }

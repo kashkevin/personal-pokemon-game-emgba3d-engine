@@ -653,7 +653,7 @@ class DioramaRuleCompilerTests(unittest.TestCase):
 
     def test_repository_navel_rock_sand_stands_over_its_pier(self):
         # KNOWN_ISSUES MS-249: Navel Rock's pier stairs climb through the island's rim to its sand, which stands a level
-        # over the pier, the rim's faces over the sand (compile_rules HAND_LEVELS); the five course pieces in the west
+        # over the pier, the rim's faces over the sand (compile_rules HAND_LEVELS); the six course pieces in the west
         # side of the rock in the middle are scenery faces (SCENERY_COURSES) whose tops lie on the sand's level. The
         # courtyard before the cave lay a level under the pier: the player stepped a level down off the stairs.
         row = next(row for row in self.data["layouts"] if row["symbol"] == "LAYOUT_NAVEL_ROCK_EXTERIOR")
@@ -667,7 +667,7 @@ class DioramaRuleCompilerTests(unittest.TestCase):
         self.assertEqual([at(x, 13) for x in (9, 10, 11)], [("stairs", 0, 16)] * 3)
         for x, y in ((8, 12), (10, 12), (12, 11), (10, 10), (8, 4), (6, 7), (14, 9)):     # the sand, the cave's door
             self.assertEqual(at(x, y), ("flat", 16, 16), (x, y))
-        for x, y in ((7, 7), (7, 8), (7, 9), (8, 9), (8, 10)):                             # the scenery faces
+        for x, y in ((7, 7), (7, 8), (7, 9), (8, 9), (8, 10), (9, 8)):                     # the scenery faces
             self.assertEqual(at(x, y), ("cliff", 0, 16), (x, y))
         for x, y in ((5, 7), (10, 3), (15, 8)):                                            # the rim over the sand
             self.assertEqual(at(x, y), ("cliff", 16, 32), (x, y))
