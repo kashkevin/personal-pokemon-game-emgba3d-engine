@@ -1073,6 +1073,23 @@ PLAIN_ROOMS = [
 ]
 
 
+# Pieces of their own some plain rooms have grown since (the 3D object audit of 2026-11-14), standing
+# before their walls. Wanda's house (Verdanturf): the white wall that parts the room (x 192-208), seen
+# from above as its top, its end a face 27 rows tall; and the bed in the east room - a headboard (8 rows,
+# on the bed's back) and the mattress on its low frame (4 rows of front).
+
+def wandas_furniture():
+    fl = GENERIC_FLOOR
+    return [
+        piece("bed_head", [(236, 31, 260, 39)], 8, base=4, leave=fl),
+        piece("bed", [(236, 39, 260, 59)], 4, leave=fl, solid=True),
+        piece("partition", [(192, 5, 208, 96)], 27, solid=True),
+    ]
+
+
+PLAIN_ROOM_PIECES = {"LAYOUT_VERDANTURF_TOWN_WANDAS_HOUSE": wandas_furniture}
+
+
 def plain_room(width, height, plain_x, sides):
     w, h = width * 16, height * 16
     side = (plain_x * 16, 0, plain_x * 16 + 16, 32)
@@ -1171,11 +1188,24 @@ def stair_room(width, height, plain_x, doors, partition=None):
 # One classroom. Its back wall is drawn from 8 rows down the first cell (the
 # black over it is nothing) to its foot 36 rows down, the blackboard and the
 # windows on its face; the pillars' feet and the teacher's step, drawn a few
-# rows further, stay on the floor.
+# rows further, stay on the floor. Twelve pupils' desks (8 rows) with a chair
+# before each (6 rows, sat on: as the Center's stools) and the teacher's desk
+# (9 rows) stand (the 3D object audit of 2026-11-14: they lay drawn on the
+# floor).
+
+SCHOOL_FLOOR = ("c5c5bd", "dedede", "a4a494")    # the tiles, their shade
+
 
 def school_room():
     side = (176, 8, 192, 36)
-    return [
+    pupils = []
+    for c in (1, 3, 8, 10):
+        for r in (5, 7, 9):
+            x, y = c * 16, r * 16
+            pupils += [piece("chair_%d_%d" % (c, r + 1), [(x + 2, y + 13, x + 14, y + 24)], 6, leave=SCHOOL_FLOOR),
+                       piece("desk_%d_%d" % (c, r), [(x, y + 1, x + 16, y + 18)], 8, leave=SCHOOL_FLOOR)]
+    return pupils + [
+        piece("teacher_desk", [(80, 58, 112, 80)], 9, leave=SCHOOL_FLOOR),
         piece("wall", [(0, 8, 192, 36)], 28, fill=16, foot=36, side=side),
         piece("side_w", [], 28, side=side, walls=[((0, 176), (0, 36))]),
         piece("side_e", [], 28, side=side, walls=[((192, 36), (192, 176))]),
@@ -1185,8 +1215,11 @@ def school_room():
 # ── The Pretty Petal flower shop ──────────────────────────────────────────
 #
 # Route 104's shop: planters of flowers and racks of potted plants about the
-# floor, a table of pots and a shelf along the back wall. The counter, the
-# stools and the vases stay drawn on the floor.
+# floor, a table of pots and a shelf along the back wall; the counter, an arm
+# from the wall to the floor's row 96 (10 rows of front) with a flap off its
+# end over a leg (a slab 3 rows thick on the counter's height: the 3D object
+# audit of 2026-11-14 - it lay drawn on the floor). The stools and the vases
+# stay drawn on the floor.
 
 SHOP_FLOOR = ("eef6ff", "d5d5e6", "b4acb4")
 SHOP_WALL = ("bdbd94", "e6e68b", "ffffbd", "629c62", "9cd59c", "4a7b41")
@@ -1210,6 +1243,8 @@ def flower_shop_room():
         planter("planter_e1", 192, 80, 128), planter("planter_e2", 208, 80, 128),
         rack("rack_1", 96), rack("rack_2", 112), rack("rack_e", 224),
         planter("planter_n1", 176, 48, 64), planter("planter_n2", 192, 48, 64),
+        piece("counter_flap", [(0, 74, 16, 88)], 3, base=7, leave=fl),
+        piece("counter", [(16, 34, 32, 96)], 10, leave=fl, solid=True),
         piece("shelf", [(112, 24, 152, 56)], 18, leave=SHOP_WALL + fl, back=42),
         piece("pots", [(162, 18, 209, 48)], 14, leave=SHOP_WALL + fl, back=32),
         piece("wall", [(0, 0, 240, 32)], 32, fill=16, foot=32, side=side),
@@ -1675,7 +1710,8 @@ SPECS = [
     {
         "name": layout[len("LAYOUT_"):].lower(),
         "interior": {"layout": layout, "ground": [ground],
-                     "pieces": own_shell(plain_room(width, height, plain_x, sides))},
+                     "pieces": own_shell(PLAIN_ROOM_PIECES.get(layout, list)()
+                                         + plain_room(width, height, plain_x, sides))},
     }
     for layout, width, height, ground, plain_x, sides in PLAIN_ROOMS
 ] + [
