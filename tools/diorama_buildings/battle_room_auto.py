@@ -100,6 +100,41 @@ APART = {
     "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_1F": {(10, 6), (13, 6)},
 }
 
+# Ship berths modelled by hand, by their metatiles (the secondary tileset's): the InsideShip tileset's
+# bed in its alcove, two cells by two under the back wall, its side board on the west or (the
+# second) the east - the S.S. Tidal's cabins and the Abandoned Ship's. The reader took the berth's
+# columns for the back wall's, one run four rows deep, and stood 48 rows of it: the bed - its
+# headboard with the name plate on it, the pillow and the mattress, all drawn from above - painted
+# upright on the wall's face (the object audit of 2026-11-14, class 2: "beds painted upright on an
+# alcove's front"). By hand (berth_pieces): the wall over it stands as the wall beside it, to the
+# row its own foot is drawn on; the berth is a bed BERTH_TALL rows tall in front of it, its top the
+# drawing from that foot (its headboard's top, the name plate, the pillow, the mattress) to the
+# frame and legs on the cells' last rows, its front.
+BERTH = {
+    "gTileset_InsideShip": ((0x250, 0x251, 0x258, 0x259), (0x254, 0x255, 0x25C, 0x25D)),
+}
+BERTH_TALL = 8          # rows of the bed's front: its frame, the legs under it
+
+
+def berths(layout, walls):
+    """[(x, y, runs)] of the berths (BERTH) a layout has whose two columns the reader read as wall
+    runs from above the berth down to its foot or past it (a bin standing at the foot of the
+    S.S. Tidal's last berth): `runs` each column's (ya, yb). A berth read otherwise is left to
+    the reader."""
+    found = []
+    for tiles in BERTH.get(layout.secondary, ()):
+        for y in range(1, layout.h - 1):
+            for x in range(layout.w - 1):
+                if (layout.metatile(x, y), layout.metatile(x + 1, y), layout.metatile(x, y + 1),
+                        layout.metatile(x + 1, y + 1)) != tiles:
+                    continue
+                runs = [[run for run, cols in walls.items() if c in cols and run[0] < y and run[1] >= y + 2]
+                        for c in (x, x + 1)]
+                if all(len(r) == 1 for r in runs):
+                    found.append((x, y, (runs[0][0], runs[1][0])))
+    return found
+
+
 # Stairwells modelled by hand, by their metatiles (the secondary tileset's): the Facility tileset's
 # flight up, three cells wide on a back wall's two rows - Mt. Pyre's floors 1F-5F, Team Aqua's
 # hideout B1F and B2F, the Space Center 1F. The reader stood its outer columns (the posts and the
@@ -364,6 +399,16 @@ def analyse(layout_id, taken=(), drop=()):
                 wall_cells.update((c, yy) for yy in range(*run))
             notes.append("door in the wall: columns %d-%d, rows %d-%d" % (x, end, run[0], run[1] - 1))
         x = end + 1
+    # berths modelled by hand (BERTH): the wall over each stands to the row its foot is drawn on
+    hand_berths = berths(L, walls)
+    for (bx, by, runs) in hand_berths:
+        for c, (ya, yb) in zip((bx, bx + 1), runs):
+            walls[(ya, yb)].remove(c)
+            walls.setdefault((ya, by), []).append(c)
+            # what the run held past the berth's foot stands as a thing of its own
+            wall_cells.difference_update((c, yy) for yy in range(by + 2, yb))
+        notes.append("berth by hand: columns %d-%d, rows %d-%d" % (bx, bx + 1, by, by + 1))
+    walls = {run: sorted(cols) for run, cols in walls.items() if cols}
     # the room's wall height: the most common standing face
     heights = collections.Counter()
     for (ya, yb), cols in walls.items():
@@ -530,7 +575,19 @@ def analyse(layout_id, taken=(), drop=()):
                         notes.append("%s: cheek at x %d, z %d-%d" % (pc["name"], x_edge, foot, back_n))
         return out
 
+    def berth_pieces():
+        """The berths' beds (BERTH): a box BERTH_TALL rows tall on the berth's foot, its top from the
+        wall's foot - the headboard's top drawn over the wall's last half row - to its front."""
+        out = []
+        for (bx, by, runs) in hand_berths:
+            X, Y = bx * 16, by * 16
+            foot = Y + 32
+            out.append(piece("berth_%d_%d" % (bx, by), [(X, Y - BERTH_TALL, X + 32, foot)], BERTH_TALL,
+                             solid=True, foot=foot, side=(X, foot - 16, X + 16, foot)))
+        return out
+
     pieces += thing_pieces()
+    pieces += berth_pieces()
     built = wall_pieces()
     pieces += built
     pieces += stairwell_pieces(built)

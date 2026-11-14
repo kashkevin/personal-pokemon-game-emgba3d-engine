@@ -102,7 +102,14 @@ the posts, is one wall on the stairwell's foot with its doorway open; the doorwa
 behind it in the flight's dark (`voxel_building_specs.stairwell`, as a house's stairs); a taller
 wall beside it carries its side on to the frame's face (`voxel_building.Cheek`). Nothing rises
 above the row the walls' tops are drawn on, so the room is its drawing again at 45 degrees, and
-the walls round it keep their heights.
+the walls round it keep their heights. The InsideShip tileset's berth - a bed in its alcove, two
+cells by two under the back wall: the S.S. Tidal's cabins and the Abandoned Ship's - is modelled
+by hand too (`battle_room_auto.BERTH`; the object audit of 2026-11-14): read as walls, its columns
+were one run four rows deep and the bed, drawn from above, stood painted upright on 48 rows of
+the wall's face. The wall over it stands to the row its foot is drawn on, as the wall beside it,
+and the berth is a bed 8 rows tall in front of it, its top the drawing from the wall's foot to
+its frame; a thing in the same run past its foot (a bin) stands on its own. Each room reads its
+own berths (a berth is no other room's to lend: `own_shell`).
 
 What the proof cannot see: it compares the picture the GBA's camera sees. A piece that gives
 back its drawing exactly can still be wrong from the battle camera's angle - the survey's

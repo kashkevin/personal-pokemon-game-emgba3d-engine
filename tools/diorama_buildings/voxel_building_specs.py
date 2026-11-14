@@ -615,13 +615,16 @@ def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=Fal
 
 def own_shell(pieces):
     """Marks a room's shell - its walls, its doorways' recesses, a maze's
-    blocks - as its own (`alone`): the generator stands a known piece
-    wherever its cells are drawn again, and a side wall, which is drawn
-    nowhere, was found wherever another room had the same floor down a
-    column - walls standing loose in the middle of Rustboro's flats."""
+    blocks, a ship cabin's berths - as its own (`alone`): the generator
+    stands a known piece wherever its cells are drawn again, and a side
+    wall, which is drawn nowhere, was found wherever another room had the
+    same floor down a column - walls standing loose in the middle of
+    Rustboro's flats. A berth's rectangle takes the half row of wall over
+    it: lent, it would take that wall cell from the room it stood in
+    (battle_room_auto.BERTH: each room reads its own)."""
     for pc in pieces:
         if pc["name"].split("_")[0] in ("wall", "side", "stairwell", "edge", "block",
-                                         "partition", "divider"):
+                                         "partition", "divider", "berth"):
             pc["alone"] = True
     return pieces
 

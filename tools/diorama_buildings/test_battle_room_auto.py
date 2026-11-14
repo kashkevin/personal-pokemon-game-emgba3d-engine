@@ -251,7 +251,8 @@ class DoorInWallTests(unittest.TestCase):
     def test_a_cabins_door_with_its_dark_top(self):
         # the cabin's doorway black over the door (read as the outside) is the wall's too
         walls, doors = self.walls("LAYOUT_SS_TIDAL_ROOMS")
-        self.assertEqual(walls["wall_3_0"], (48, 0, 96, 32))
+        # one wall across the cabin: the door's columns and the walls over its two berths (BERTH)
+        self.assertEqual(walls["wall_1_0"], (16, 0, 128, 32))
         self.assertEqual(len(doors), 4)
 
     def test_a_door_whose_frame_a_script_changes_stays_out(self):
@@ -436,3 +437,68 @@ class StairwellTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BerthTests(unittest.TestCase):
+    """The object audit of 2026-11-14 (class 2): the ship cabins' berths - the InsideShip tileset's bed in its
+    alcove, two cells by two under the back wall - were read with the back wall's columns as one run four rows
+    deep, 48 rows of it standing: the bed, drawn from above, painted upright on the wall's face. By hand (BERTH):
+    the wall over each stands to the row its foot is drawn on, as the wall beside it; the berth is a bed 8 rows
+    tall in front of it."""
+
+    ROOMS = {
+        "LAYOUT_SS_TIDAL_ROOMS": {(1, 2), (6, 2), (10, 2), (15, 2), (19, 2), (33, 2), (1, 11), (6, 11), (24, 11),
+                                  (28, 11)},
+        "LAYOUT_ABANDONED_SHIP_ROOMS_1F": {(10, 2), (1, 11), (15, 11)},
+        "LAYOUT_ABANDONED_SHIP_ROOMS_B1F": {(1, 2), (6, 2), (10, 2), (19, 2), (24, 2)},
+        "LAYOUT_ABANDONED_SHIP_ROOMS2_1F": {(1, 2)},
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.read = {lid: bra.analyse(lid) for lid in cls.ROOMS}
+
+    def test_every_berth_in_the_auto_rooms_is_found(self):
+        import battle_room_specs
+        found = {}
+        for lid in battle_room_specs.AUTO_ROOMS:
+            L = vb.LayoutArt(lid)
+            spots = {(x, y) for tiles in bra.BERTH.get(L.secondary, ()) for y in range(L.h - 1) for x in range(L.w - 1)
+                     if (L.metatile(x, y), L.metatile(x + 1, y), L.metatile(x, y + 1), L.metatile(x + 1, y + 1)) == tiles}
+            if spots:
+                found[lid] = spots
+        self.assertEqual(found, self.ROOMS)
+
+    def test_each_is_a_bed_before_the_wall(self):
+        for lid, spots in self.ROOMS.items():
+            ground, pieces, notes = self.read[lid]
+            names = {pc["name"]: pc for pc in pieces}
+            for (bx, by) in spots:
+                X, Y = bx * 16, by * 16
+                with self.subTest(room=lid, berth=(bx, by)):
+                    bed = names["berth_%d_%d" % (bx, by)]
+                    self.assertEqual(bed["shape"], [(X, Y - bra.BERTH_TALL, X + 32, Y + 32)])
+                    self.assertEqual(bed["height"], bra.BERTH_TALL)
+                    # its top's far edge, at its height, is the wall's foot: z = row + height
+                    self.assertEqual(Y - bra.BERTH_TALL + bed["height"], Y)
+                    # the wall over its columns stands on the berth's top row, no taller than the room's
+                    walls = [pc for pc in pieces if pc["name"].startswith("wall_")
+                             and pc["shape"][0][0] <= X and X + 32 <= pc["shape"][0][2]
+                             and pc["shape"][0][1] < Y <= pc["shape"][0][3]]
+                    self.assertEqual(len(walls), 1)
+                    self.assertEqual(walls[0]["foot"], Y)
+                    self.assertLessEqual(walls[0]["height"], 32)
+                    # and no other piece takes the berth's cells
+                    for pc in pieces:
+                        if pc is bed:
+                            continue
+                        for (x0, y0, x1, y1) in pc["shape"]:
+                            self.assertFalse(x0 < X + 32 and X < x1 and y0 < Y + 32 and Y < y1, pc["name"])
+
+    def test_the_bin_at_a_berths_foot_stands_alone(self):
+        # the S.S. Tidal's last berth (28, 11) has a bin on the cell at its foot (28, 13), in the same run
+        ground, pieces, notes = self.read["LAYOUT_SS_TIDAL_ROOMS"]
+        names = {pc["name"]: pc for pc in pieces}
+        bin_ = names["edge_28_13"]
+        self.assertEqual(bin_["shape"], [(448, 208, 464, 224)])
+        self.assertEqual(bin_["height"], 8)
