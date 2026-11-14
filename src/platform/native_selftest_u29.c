@@ -1430,6 +1430,52 @@ int NativeSelfTest_Coins(void)
         ExpectLeg("a full wallet cannot overflow", GetCoins() == MAX_COINS_WALLET);
     }
 
+    // 2b. a win past the table's credit (KNOWN_ISSUES MS-85, the owner's decisions of 2026-10-26 "no cap" and #65 of
+    // 2026-11-14): the credit stops at MAX_COINS, the rest goes to the reserve, both reach the Coin Case on leaving; the
+    // Coin Case stops at MAX_COINS_WALLET (the tables then say it is full); a big Coin Case tops the table up from its
+    // reserve so the table never says it ran out while the Coin Case holds coins
+    {
+        u32 credit;
+
+        SetCoins(60000);
+        CoinWallet_BeginTable(); // a 5,000 stake, 55,000 in reserve
+        credit = CoinWallet_PayTable(9865, 6000);
+        ExpectLeg("a 6,000 win at a credit of 9,865: the credit 9,999, the reserve +5,866",
+                  credit == 9999 && CoinWallet_Reserve() == 60866);
+        credit = CoinWallet_PayTable(9590, 2400);
+        ExpectLeg("a 2,400 win at 9,590: the credit 9,999, the reserve +1,991", credit == 9999 && CoinWallet_Reserve() == 62857);
+        ExpectLeg("the whole Coin Case at the table: the reserve and the credit", CoinWallet_Total(9999) == 72856);
+        CoinWallet_TableSet(9999);
+        ExpectLeg("leaving with 9,999 on the table: the Coin Case holds the reserve and the credit (72,856)",
+                  GetCoins() == 72856);
+        SetCoins(999000);
+        CoinWallet_BeginTable(); // 5,000 on the table, 994,000 in reserve
+        credit = CoinWallet_PayTable(5000, 3000);
+        ExpectLeg("a 3,000 win 999 short of the Coin Case's maximum: 999 kept, the table says the Coin Case is full",
+                  credit == 5999 && CoinWallet_Reserve() == 994000 && CoinWallet_TableFull(credit)
+                  && CoinWallet_Total(credit) == MAX_COINS_WALLET);
+        ExpectLeg("at the maximum a further win keeps nothing", CoinWallet_PayTable(credit, 100) == 5999
+                  && CoinWallet_Reserve() == 994000);
+        CoinWallet_TableSet(credit);
+        ExpectLeg("leaving a full table: the Coin Case holds 999,999", GetCoins() == MAX_COINS_WALLET);
+        SetCoins(990000);
+        CoinWallet_BeginTable();
+        credit = CoinWallet_PayTable(9990, 20000);
+        ExpectLeg("a win past the credit's 9,999 near the maximum: 9 to the credit, the rest to the reserve up to 999,999",
+                  credit == 9999 && CoinWallet_Total(credit) == MAX_COINS_WALLET && CoinWallet_TableFull(credit));
+        SetCoins(50000);
+        CoinWallet_BeginTable();
+        credit = CoinWallet_TopUp(10, 15);
+        ExpectLeg("a credit of 10 below the slot's largest bet (15) is topped up to the stake from the reserve",
+                  credit == 5000 && CoinWallet_Reserve() == 40010 && CoinWallet_Total(credit) == 45010);
+        ExpectLeg("a credit that covers the bet is left as it is", CoinWallet_TopUp(20, 15) == 20
+                  && CoinWallet_Reserve() == 40010);
+        SetCoins(7000);
+        CoinWallet_BeginTable();
+        ExpectLeg("a small Coin Case, staked whole, has no reserve to top up from", CoinWallet_TopUp(3, 15) == 3
+                  && CoinWallet_Reserve() == 0);
+    }
+
     // 3. the price list
     {
         extern const u16 MauvilleCity_Mart_Pokemart_MegaStones[];

@@ -452,6 +452,11 @@ static const u8 Roulette_Text_NoCoinsLeft[] = _("No COINS left…");
 static const u8 Roulette_Text_KeepPlaying[] = _("Keep playing?");
 static const u8 Roulette_Text_BoardWillBeCleared[] = _("The ROULETTE board will be cleared.");
 static const u8 Roulette_Text_CoinCaseIsFull[] = _("Your COIN CASE is full!\nCoins can be exchanged for prizes.");
+#ifdef PORTABLE
+// the Coin Case's maximum, MAX_COINS_WALLET (the owner's decision #65, 2026-11-14): what a win brings past it is not kept
+static const u8 Roulette_Text_CoinCaseFullPc[] = _("Your COIN CASE is full!\nIt holds 999,999 COINS at most.");
+#endif
+#line 431 // gba-line
 
 static const u16 sWheel_Pal[] = INCGFX_U16("graphics/roulette/wheel.png", ".gbapal"); // also palette for grid
 static const u32 sGrid_Tilemap[] = INCGFX_U32("graphics/roulette/grid.bin", ".smolTM");
@@ -1349,6 +1354,13 @@ static void Task_StartPlaying(u8 taskId)
 
 static void Task_AskKeepPlaying(u8 taskId)
 {
+#ifdef PORTABLE
+    // the whole Coin Case beside the question (the owner's decision #65, 2026-11-14): CREDIT shows the coins on the
+    // table (four digits; a big Coin Case's table plays a 5,000 stake). Only at this prompt: while a bet is chosen BG0
+    // draws the grid's selection with other tiles (VBlankCB_Roulette), which a box kept up would garble.
+    ShowCoinsWindow(CoinWallet_Total(gTasks[taskId].tCoins), 1, 1);
+#endif
+#line 1308 // gba-line
     DisplayYesNoMenuDefaultYes();
     DrawStdWindowFrame(sTextWindowId, FALSE);
     AddTextPrinterParameterized(sTextWindowId, FONT_NORMAL, Roulette_Text_KeepPlaying, 0, 1, TEXT_SKIP_DRAW, 0);
@@ -1358,12 +1370,20 @@ static void Task_AskKeepPlaying(u8 taskId)
 
 static void Task_ContinuePlaying(u8 taskId)
 {
+#ifdef PORTABLE
+    HideCoinsWindow();
+#endif
+#line 1317 // gba-line
     ClearStdWindowAndFrame(0, TRUE);
     gTasks[taskId].func = Task_SelectFirstEmptySquare;
 }
 
 static void Task_StopPlaying(u8 taskId)
 {
+#ifdef PORTABLE
+    HideCoinsWindow();
+#endif
+#line 1323 // gba-line
     DestroyTask(sRoulette->spinTaskId);
     ExitRoulette(taskId);
 }
@@ -1902,18 +1922,19 @@ static void Task_GivePayout(u8 taskId)
     case 0:
 #ifdef PORTABLE
         // PC: the credit stops at MAX_COINS but nothing is cut - the rest of
-        // the payout goes to the Coin Case (CoinWallet_Bank: the owner's "no
-        // cap", 2026-10-26)
-        if (gTasks[taskId].tCoins < MAX_COINS)
+        // the payout goes to the Coin Case (CoinWallet_PayTable: the owner's
+        // "no cap", 2026-10-26), as far as its maximum (#65, 2026-11-14)
+        if (gTasks[taskId].tCoins < MAX_COINS && !CoinWallet_TableFull(gTasks[taskId].tCoins))
         {
             gTasks[taskId].tCoins++;
             gTasks[taskId].tPayout--;
         }
         m4aSongNumStart(SE_PIN);
         SetCreditDigits(gTasks[taskId].tCoins);
-        if (gTasks[taskId].tCoins >= MAX_COINS)
+        if (gTasks[taskId].tCoins >= MAX_COINS || CoinWallet_TableFull(gTasks[taskId].tCoins))
         {
-            CoinWallet_Bank(gTasks[taskId].tPayout);
+            // the rest to the reserve, as far as the Coin Case's maximum (#65)
+            CoinWallet_PayTable(gTasks[taskId].tCoins, gTasks[taskId].tPayout);
             gTasks[taskId].tPayout = 0;
         }
         else
@@ -1950,12 +1971,8 @@ static void Task_GivePayout(u8 taskId)
     // request of 2026-10-26); the win's message then waits for A or B as before
     if (JOY_NEW(A_BUTTON) && gTasks[taskId].tPayout != 0)
     {
-        s32 coins = gTasks[taskId].tCoins + gTasks[taskId].tPayout;
-
-        // past MAX_COINS the credit has no room: those go to the Coin Case
-        if (coins > MAX_COINS)
-            CoinWallet_Bank(coins - MAX_COINS);
-        gTasks[taskId].tCoins = coins > MAX_COINS ? MAX_COINS : coins;
+        // past MAX_COINS the credit has no room: those go to the Coin Case, as far as its maximum (#65)
+        gTasks[taskId].tCoins = CoinWallet_PayTable(gTasks[taskId].tCoins, gTasks[taskId].tPayout);
         SetCreditDigits(gTasks[taskId].tCoins);
         m4aSongNumStart(SE_PIN);
         gTasks[taskId].tPayout = 0;
@@ -2008,6 +2025,12 @@ static void Task_TryPrintEndTurnMsg(u8 taskId)
             gSprites[sRoulette->spriteIds[i + SPR_POKE_HEADERS]].sheetTileStart
             + (*gSprites[sRoulette->spriteIds[i + SPR_POKE_HEADERS]].anims)->type;
     }
+#ifdef PORTABLE
+    // a big Coin Case tops the table up from its reserve: no "No COINS left" while the Coin Case holds coins (#65)
+    gTasks[taskId].tCoins = CoinWallet_TopUp(gTasks[taskId].tCoins, sRoulette->minBet);
+    SetCreditDigits(gTasks[taskId].tCoins);
+#endif
+#line 1912 // gba-line
     if (gTasks[taskId].tCoins >= sRoulette->minBet)
     {
         if (gTasks[taskId].tBallNum == BALLS_PER_ROUND)
@@ -2019,7 +2042,9 @@ static void Task_TryPrintEndTurnMsg(u8 taskId)
             StartTaskAfterDelayOrInput(taskId, Task_ClearBoard, NO_DELAY, A_BUTTON | B_BUTTON);
         }
 #ifdef PORTABLE
-        else if (FALSE) // PC: never full - past MAX_COINS a win goes to the Coin Case (Task_GivePayout)
+        // PC: past MAX_COINS a win goes to the Coin Case (Task_GivePayout); the message only when the whole Coin Case
+        // is full, at MAX_COINS_WALLET (#65)
+        else if (CoinWallet_TableFull(gTasks[taskId].tCoins))
 #else
 #line 1922 // gba-line
         else if (gTasks[taskId].tCoins == MAX_COINS)
@@ -2028,7 +2053,13 @@ static void Task_TryPrintEndTurnMsg(u8 taskId)
         {
             // Player maxed out coins
             DrawStdWindowFrame(sTextWindowId, FALSE);
+#ifdef PORTABLE
+            AddTextPrinterParameterized(sTextWindowId, FONT_NORMAL, Roulette_Text_CoinCaseFullPc, 0, 1, TEXT_SKIP_DRAW, NULL);
+#else
+#line 1926 // gba-line
             AddTextPrinterParameterized(sTextWindowId, FONT_NORMAL, Roulette_Text_CoinCaseIsFull, 0, 1, TEXT_SKIP_DRAW, NULL);
+#endif
+#line 1927 // gba-line
             CopyWindowToVram(sTextWindowId, COPYWIN_FULL);
             StartTaskAfterDelayOrInput(taskId, Task_AskKeepPlaying, NO_DELAY, A_BUTTON | B_BUTTON);
         }
@@ -2065,10 +2096,10 @@ static void Task_ClearBoard(u8 taskId)
     }
 
 #ifdef PORTABLE
-    if (FALSE) // PC: never full - past MAX_COINS a win goes to the Coin Case (Task_GivePayout)
+    if (CoinWallet_TableFull(gTasks[taskId].tCoins)) // PC: the whole Coin Case at its maximum (#65)
     {
         DrawStdWindowFrame(sTextWindowId, FALSE);
-        AddTextPrinterParameterized(sTextWindowId, FONT_NORMAL, Roulette_Text_CoinCaseIsFull, 0, 1, TEXT_SKIP_DRAW, NULL);
+        AddTextPrinterParameterized(sTextWindowId, FONT_NORMAL, Roulette_Text_CoinCaseFullPc, 0, 1, TEXT_SKIP_DRAW, NULL);
 #else
 #line 1962 // gba-line
     if (gTasks[taskId].tCoins == MAX_COINS)
@@ -3496,7 +3527,13 @@ static void Task_PrintMinBet(u8 taskId)
 static void Task_PrintRouletteEntryMsg(u8 taskId)
 {
     s32 minBet;
+#ifdef PORTABLE
+    PrintCoinsString(CoinWallet_Total(gTasks[taskId].tCoins)); // the whole Coin Case, not the stake (#65)
+#else
+#line 3372 // gba-line
     PrintCoinsString(gTasks[taskId].tCoins);
+#endif
+#line 3373 // gba-line
     minBet = sTableMinBets[GET_MIN_BET_ID(gSpecialVar_0x8004)];
 #ifdef PORTABLE
     ConvertIntToDecimalStringN(gStringVar1, minBet, STR_CONV_MODE_LEFT_ALIGN, 3);
@@ -3547,9 +3584,13 @@ void PlayRoulette(void)
     LockPlayerFieldControls();
 #ifdef PORTABLE
     CoinWallet_BeginTable();
-#endif
+    // the box shows the whole Coin Case, not the table's stake (#65: a big Coin Case read 5000 COINS here)
+    ShowCoinsWindow(CoinWallet_Total(GetCoins()), 1, 1);
+#else
 #line 3413 // gba-line
     ShowCoinsWindow(GetCoins(), 1, 1);
+#endif
+#line 3414 // gba-line
     taskId = CreateTask(Task_PrintRouletteEntryMsg, 0);
     gTasks[taskId].tCoins = GetCoins();
 }
@@ -4877,7 +4918,7 @@ bool32 Roulette_NativeUiState(struct RouletteNativeState *out)
     out->coins = task->tCoins;
     // the table plays with a stake of a big Coin Case (CoinWallet_BeginTable): the rest, and winnings past the credit's
     // 9,999, wait in reserve; leaving puts both back (ExitRoulette), so the Coin Case is their sum all along
-    out->wallet = CoinWallet_Reserve() + (task->tCoins > 0 ? (u32)task->tCoins : 0);
+    out->wallet = CoinWallet_Total(task->tCoins > 0 ? (u32)task->tCoins : 0);
     out->payout = task->func == Task_GivePayout ? task->data[1] : 0;
     out->ballsLeft = task->tBallNum < BALLS_PER_ROUND ? BALLS_PER_ROUND - task->tBallNum : 0;
     out->cursor = task->tSelectionId;

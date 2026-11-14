@@ -37,10 +37,39 @@ u32 CoinWallet_Reserve(void)
     return sReserve;
 }
 
-void CoinWallet_Bank(u32 coins)
+u32 CoinWallet_PayTable(u32 credit, u32 coins)
 {
-    u32 room = sReserve < MAX_COINS_WALLET ? MAX_COINS_WALLET - sReserve : 0;
+    u32 total = sReserve + credit;
+    u32 room = total < MAX_COINS_WALLET ? MAX_COINS_WALLET - total : 0;
+    u32 kept = coins < room ? coins : room;
+    u32 creditRoom = credit < MAX_COINS ? MAX_COINS - credit : 0;
+    u32 toCredit = kept < creditRoom ? kept : creditRoom;
 
-    sReserve += coins < room ? coins : room;
+    sReserve += kept - toCredit;
+    return credit + toCredit;
+}
+
+bool32 CoinWallet_TableFull(u32 credit)
+{
+    return sReserve + credit >= MAX_COINS_WALLET;
+}
+
+u32 CoinWallet_Total(u32 credit)
+{
+    u32 total = sReserve + credit;
+
+    return total < MAX_COINS_WALLET ? total : MAX_COINS_WALLET;
+}
+
+u32 CoinWallet_TopUp(u32 credit, u32 need)
+{
+    u32 want, moved;
+
+    if (credit >= need || sReserve == 0)
+        return credit;
+    want = COIN_TABLE_STAKE > credit ? COIN_TABLE_STAKE - credit : 0;
+    moved = want < sReserve ? want : sReserve;
+    sReserve -= moved;
+    return credit + moved;
 }
 #endif

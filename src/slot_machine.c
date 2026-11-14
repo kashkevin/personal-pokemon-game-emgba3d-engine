@@ -31,6 +31,7 @@
 // Update 29: tables take a stake from the 32-bit wallet (include/platform/coin_wallet.h)
 #include "platform/coin_wallet.h"
 #include "platform/casino_rates.h"
+#include "international_string_util.h"
 #define GetCoins CoinWallet_TableGet
 #define SetCoins CoinWallet_TableSet
 #endif
@@ -660,6 +661,11 @@ static void SpriteCB_PikaPowerBolt(struct Sprite *);
 
 static const u8 sText_QuitTheGame[] = _("Quit the game?");
 static const u8 sText_YouveGot9999Coins[] = _("You've got 9,999 COINS.");
+#ifdef PORTABLE
+// the Coin Case's maximum, MAX_COINS_WALLET (the owner's decision #65, 2026-11-14): what a win brings past it is not kept
+static const u8 sText_CoinCaseFullPc[] = _("Your COIN CASE is full!\nIt holds 999,999 COINS at most.");
+#endif
+#line 655 // gba-line
 static const u8 sText_YouveRunOutOfCoins[] = _("You've run out of COINS.\nGame over!");
 #ifdef PORTABLE
 #if CASINO_SLOT_COINS_PER_BET != 5
@@ -1118,6 +1124,49 @@ static void CB2_SlotMachineSetup(void)
     }
 }
 
+#ifdef PORTABLE
+// The Classic 2D machine's COIN CASE label (the owner's decision #65, 2026-11-14): CREDIT shows the coins on the table
+// (four digits, at most 9,999; a big Coin Case's table plays a 5,000 stake), so a small label in the screen's top-left
+// corner - where neither the messages (rows 14-19) nor the INFO box reach - shows the whole Coin Case, the reserve and
+// the credit (CoinWallet_Total), drawn again when it changes. The 3D game's own screen shows the same total.
+#define COIN_CASE_LABEL_BLOCK 0x170 // BG0's free tiles: the INFO box takes 1-0x104, WIN_MSG 0x194 on
+static EWRAM_DATA u8 sCoinCaseLabel = WINDOW_NONE;
+static EWRAM_DATA u32 sCoinCaseShown = 0;
+static const u8 sText_CoinsLabel[] = _(" COINS");
+static const u8 sColors_CoinsLabel[] = {TEXT_COLOR_DARK_GRAY, TEXT_COLOR_WHITE, TEXT_COLOR_LIGHT_GRAY};
+
+static void UpdateCoinCaseLabel(void)
+{
+    static const struct WindowTemplate sTemplate = {
+        .bg = 0, .tilemapLeft = 0, .tilemapTop = 0, .width = 9, .height = 2, .paletteNum = 15,
+        .baseBlock = COIN_CASE_LABEL_BLOCK,
+    };
+    u8 text[24];
+    u32 total;
+
+    if (sSlotMachine == NULL)
+        return;
+    total = CoinWallet_Total(sSlotMachine->coins);
+    if (sCoinCaseLabel == WINDOW_NONE)
+    {
+        sCoinCaseLabel = AddWindow(&sTemplate);
+        if (sCoinCaseLabel == WINDOW_NONE)
+            return;
+        sCoinCaseShown = total + 1;
+    }
+    if (total == sCoinCaseShown)
+        return;
+    sCoinCaseShown = total;
+    ConvertIntToDecimalStringN(text, total, STR_CONV_MODE_LEFT_ALIGN, 6);
+    StringAppend(text, sText_CoinsLabel);
+    FillWindowPixelBuffer(sCoinCaseLabel, PIXEL_FILL(TEXT_COLOR_DARK_GRAY));
+    AddTextPrinterParameterized3(sCoinCaseLabel, FONT_SMALL, GetStringRightAlignXOffset(FONT_SMALL, text, 9 * 8 - 3), 2,
+                                 sColors_CoinsLabel, TEXT_SKIP_DRAW, text);
+    PutWindowTilemap(sCoinCaseLabel);
+    CopyWindowToVram(sCoinCaseLabel, COPYWIN_FULL);
+}
+#endif
+#line 1104 // gba-line
 static void CB2_SlotMachine(void)
 {
     RunTasks();
@@ -1127,6 +1176,7 @@ static void CB2_SlotMachine(void)
     // the BIOS there; a PC crashed as the player left the machine).
     if (sSlotMachine == NULL)
         return;
+    UpdateCoinCaseLabel();
 #endif
 #line 1107 // gba-line
     AnimateSprites();
@@ -1186,6 +1236,10 @@ static void SlotMachineSetup_InitBgsWindows(void)
     InitBgsFromTemplates(0, sBgTemplates, ARRAY_COUNT(sBgTemplates));
     InitWindows(sWindowTemplates);
     DeactivateAllTextPrinters();
+#ifdef PORTABLE
+    sCoinCaseLabel = WINDOW_NONE; // InitWindows freed it (UpdateCoinCaseLabel adds it again)
+#endif
+#line 1157 // gba-line
 }
 
 static void SlotMachineSetup_InitVBlank(void)
@@ -1355,6 +1409,8 @@ static bool8 SlotTask_ReadyNewSpin(struct Task *task)
     sSlotMachine->machineBias &= (BIAS_STRAIGHT_7 | BIAS_MIXED_7);
     sSlotMachine->state = SLOTTASK_ASK_INSERT_BET;
 #ifdef PORTABLE
+    // a big Coin Case tops the table up from its reserve: no "run out" while the Coin Case holds coins (#65)
+    sSlotMachine->coins = CoinWallet_TopUp(sSlotMachine->coins, CASINO_SLOT_COINS_PER_BET * MAX_BET);
     if (sSlotMachine->coins < CASINO_SLOT_COINS_PER_BET)
     {
         sSlotMachine->state = SLOTTASK_MSG_NO_MORE_COINS;
@@ -1388,7 +1444,10 @@ static bool8 SlotTask_AskInsertBet(struct Task *task)
     CreateDigitalDisplayScene(DIG_DISPLAY_INSERT_BET);
     sSlotMachine->state = SLOTTASK_BET_INPUT;
 #ifdef PORTABLE
-    // PC: never full - past MAX_COINS a win goes to the Coin Case (AddTableCoins)
+    // PC: past MAX_COINS a win goes to the Coin Case (AddTableCoins); the message only when the whole Coin Case is full,
+    // at MAX_COINS_WALLET (the owner's decision #65, 2026-11-14)
+    if (CoinWallet_TableFull(sSlotMachine->coins))
+        sSlotMachine->state = SLOTTASK_MSG_MAX_COINS;
 #else
 #line 1346 // gba-line
     if (sSlotMachine->coins >= MAX_COINS)
@@ -1781,7 +1840,13 @@ static bool8 SlotTask_HandleQuitInput(struct Task *task)
 static bool8 SlotTask_PrintMsg_MaxCoins(struct Task *task)
 {
     DrawDialogueFrame(WIN_MSG, FALSE);
+#ifdef PORTABLE
+    AddTextPrinterParameterized(WIN_MSG, FONT_NORMAL, sText_CoinCaseFullPc, 0, 1, 0, 0);
+#else
+#line 1702 // gba-line
     AddTextPrinterParameterized(WIN_MSG, FONT_NORMAL, sText_YouveGot9999Coins, 0, 1, 0, 0);
+#endif
+#line 1703 // gba-line
     CopyWindowToVram(WIN_MSG, COPYWIN_FULL);
     sSlotMachine->state = SLOTTASK_WAIT_MSG_MAX_COINS;
     return FALSE;
@@ -2213,15 +2278,11 @@ static bool8 PayoutTask_Init(struct Task *task)
 }
 #ifdef PORTABLE
 // The credit stops at MAX_COINS (four digits); what a win brings past it goes
-// to the Coin Case instead of being cut (CoinWallet_Bank: the owner's "no cap",
+// to the Coin Case instead of being cut (CoinWallet_PayTable: the owner's "no cap",
 // 2026-10-26).
 static void AddTableCoins(u32 coins)
 {
-    u32 room = sSlotMachine->coins < MAX_COINS ? MAX_COINS - sSlotMachine->coins : 0;
-    u32 credit = coins < room ? coins : room;
-
-    sSlotMachine->coins += credit;
-    CoinWallet_Bank(coins - credit);
+    sSlotMachine->coins = CoinWallet_PayTable(sSlotMachine->coins, coins);
 }
 #endif
 #line 2132 // gba-line
@@ -8081,7 +8142,7 @@ static const u8 *NativeUiMessage(void)
         return sText_YouDontHaveThreeCoins;
     case SLOTTASK_MSG_MAX_COINS:
     case SLOTTASK_WAIT_MSG_MAX_COINS:
-        return sText_YouveGot9999Coins;
+        return sText_CoinCaseFullPc; // the Coin Case's maximum (#65), as the Classic 2D machine says it
     case SLOTTASK_MSG_NO_MORE_COINS:
     case SLOTTASK_WAIT_MSG_NO_MORE_COINS:
         return sText_YouveRunOutOfCoins;
@@ -8104,7 +8165,7 @@ bool32 SlotMachine_NativeUiState(struct SlotMachineNativeState *out)
     out->machineId = sSlotMachine->machineId;
     out->coins = sSlotMachine->coins;
     // the Coin Case as it stands: the machine's credit and the coins a big Coin Case keeps in reserve (CoinWallet_BeginTable)
-    out->wallet = CoinWallet_Reserve() + (sSlotMachine->coins > 0 ? (u32)sSlotMachine->coins : 0);
+    out->wallet = CoinWallet_Total(sSlotMachine->coins > 0 ? (u32)sSlotMachine->coins : 0);
     out->payout = sSlotMachine->payout;
     out->bet = sSlotMachine->bet;
     out->pikaPowerBolts = sSlotMachine->pikaPowerBolts;
