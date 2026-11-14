@@ -957,13 +957,73 @@ static bool SolidSmallTrunk(const struct MapLayout *layout, u16 metatileId)
  * (TryCopyConnectedCell), the border cells too, but for those on a page: they
  * share its primary (General) and have their own secondary.
  */
+/*
+ * With the voxel trees (KNOWN_ISSUES MS-245, the owner's decision #60): each
+ * tree's cell keeps its tree (the rules build the voxel tree from it) and
+ * notes the ground the 3DS trees would lay there (ApplyTreeSprites' choice for
+ * a tree's own cell: the General trees' trunk ground, Dewford's sand, the ash,
+ * Mossdeep's, Lavaridge's and Fortree's), which the terrain lays under the
+ * voxel tree instead of the screen's commonest ground darkened to a square.
+ * A crown's top over other ground is left as it was (its place's heights are
+ * the rules' and its ground the tree's own; V23).
+ */
+static void NoteTreeGrounds(struct DioramaSceneSnapshot *snapshot)
+{
+    const struct MapLayout *mapLayout = gMapHeader.mapLayout;
+    int i;
+
+    for (i = 0; i < snapshot->visibleCellCount; i++)
+    {
+        struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+        const struct MapLayout *layout = cell->atlasPage != 0 ? sPageLayouts[cell->atlasPage - 1]
+                                                              : mapLayout;
+        bool dewford;
+        uint16_t ground = 0;
+
+        cell->treeGround = 0;
+        if (layout == NULL)
+            continue;
+        dewford = layout->secondaryTileset == &gTileset_Dewford;
+        if (layout->secondaryTileset == &gTileset_Fallarbor
+         && DioramaTreeSprites_AshPart(cell->metatileId) != DIORAMA_TREE_PART_NONE)
+            ground = DioramaTreeSprites_AshGround(cell->metatileId);
+        else if (layout->secondaryTileset == &gTileset_Lavaridge
+              && DioramaTreeSprites_LavaridgePart(cell->metatileId) != DIORAMA_TREE_PART_NONE)
+            ground = DioramaTreeSprites_LavaridgeGround(cell->metatileId);
+        else if (layout->secondaryTileset == &gTileset_Mossdeep
+              && DioramaTreeSprites_MossdeepPart(cell->metatileId) != DIORAMA_TREE_PART_NONE)
+        {
+            const struct DioramaCellSnapshot *below = i + DIORAMA_GRID_WIDTH < snapshot->visibleCellCount
+                                                   && snapshot->cells[i + DIORAMA_GRID_WIDTH].atlasPage
+                                                      == cell->atlasPage
+                                                    ? &snapshot->cells[i + DIORAMA_GRID_WIDTH] : NULL;
+
+            ground = DioramaTreeSprites_MossdeepGround(cell->metatileId, below != NULL ? below->metatileId : 0);
+        }
+        else if (layout->secondaryTileset == &gTileset_Fortree
+              && DioramaTreeSprites_FortreePart(cell->metatileId) == DIORAMA_TREE_PART_SMALL)
+            ground = DioramaTreeSprites_FortreeGround(cell->metatileId);
+        else if (DioramaTreeSprites_Part(dewford, cell->metatileId) != DIORAMA_TREE_PART_NONE)
+            ground = DioramaTreeSprites_TrunkGround(cell->metatileId >= NUM_METATILES_IN_PRIMARY);
+        if (ground != cell->metatileId)
+            cell->treeGround = ground;
+    }
+}
+
 static void ApplyTreeSprites(struct DioramaSceneSnapshot *snapshot)
 {
     const struct MapLayout *mapLayout = gMapHeader.mapLayout;
     int i;
 
     /* set with the tree style (DioramaScene_PublishOverworld), which the buildings' grounds read too */
-    if (!snapshot->treeSprites || mapLayout == NULL)
+    if (!snapshot->treeSprites)
+    {
+        NoteTreeGrounds(snapshot);
+        return;
+    }
+    for (i = 0; i < snapshot->visibleCellCount; i++)
+        snapshot->cells[i].treeGround = 0;                  /* the 3DS trees lay their ground as the cell itself */
+    if (mapLayout == NULL)
         return;
     for (i = 0; i < snapshot->visibleCellCount; i++)
     {

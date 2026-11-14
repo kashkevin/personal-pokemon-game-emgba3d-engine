@@ -2547,11 +2547,28 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
             {
                 struct DioramaTerrainCell *cell =
                     &input->cells[y * DIORAMA_TERRAIN_INPUT_SIZE + x];
+                const struct DioramaCellSnapshot *source;
 
-                if (cell->present
-                 && (cell->treeHullReady
-                  || (cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
-                   && cell->structureWidth == 2)))
+                if (!cell->present
+                 || !(cell->treeHullReady
+                   || (cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
+                    && cell->structureWidth == 2)))
+                    continue;
+                /* KNOWN_ISSUES MS-245 (the owner's decision #60): the ground the
+                 * 3DS trees lay under this tree's cell (the snapshot's treeGround),
+                 * so the voxel tree stands on the ground the default trees show;
+                 * the commonest ground where the snapshot named none */
+                source = FindSnapshotCell(snapshot, cell->mapX - sShiftX, cell->mapY - sShiftY);
+                if (source != NULL && source->treeGround != 0)
+                {
+                    sMaterialPage = source->atlasPage;
+                    sInputPages |= 1u << DioramaAtlas_PageRegion(source->atlasPage);
+                    for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
+                        SetTerrainMaterial(&cell->underlayMaterials[face], source->treeGround,
+                                           DIORAMA_MATERIAL_FULL);
+                    sMaterialPage = 0;
+                }
+                else
                     for (face = 0; face < DIORAMA_MATERIAL_FACE_COUNT; face++)
                         SetTerrainMaterialSlot(&cell->underlayMaterials[face], groundMetatile,
                                                DIORAMA_MATERIAL_FULL);

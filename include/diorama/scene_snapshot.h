@@ -178,6 +178,11 @@ struct DioramaCellSnapshot
      * neighbouring map's (its metatileId and tileEntries are that map's). */
     uint8_t atlasPage;
     uint16_t tileEntries[DIORAMA_METATILE_ENTRY_COUNT];
+    /* With the Diorama's voxel trees (the 3DS project's off): the ground the
+     * 3DS trees lay under this tree's cell (ApplyTreeSprites), which the voxel
+     * tree stands on - the same ground in both styles (KNOWN_ISSUES MS-245,
+     * the owner's decision #60); 0 for any other cell. */
+    uint16_t treeGround;
 };
 
 struct DioramaFarBlock

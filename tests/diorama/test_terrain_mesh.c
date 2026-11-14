@@ -1446,7 +1446,7 @@ static void TestLargeGroupedTreeUsesAuthoredVoxelModel(void)
     struct DioramaTerrainChunkInput input;
     struct DioramaTerrainMesh mesh;
     bool sawBase = false;
-    bool sawShadowedGrass = false;
+    bool sawLitGround = false;
 
     InitInput(&input, 3, MB_NORMAL);
     for (int localY = 0; localY < 3; localY++)
@@ -1494,11 +1494,16 @@ static void TestLargeGroupedTreeUsesAuthoredVoxelModel(void)
     for (uint32_t vertex = 0; vertex < mesh.vertexCount; vertex++)
     {
         sawBase |= sVertices[vertex].textureLayer == DIORAMA_TERRAIN_TEXTURE_BASE;
-        sawShadowedGrass |= sVertices[vertex].textureLayer == DIORAMA_TERRAIN_TEXTURE_BASE
-                         && sVertices[vertex].shade == 0.78f;
+        /* KNOWN_ISSUES MS-245 (the owner's decision #60): the ground under the
+         * voxel tree is lit as the ground beside it - darkened to 0.78 it read
+         * as a square under every large tree; the tree's shadow is the sun's */
+        assert(!(sVertices[vertex].textureLayer == DIORAMA_TERRAIN_TEXTURE_BASE
+                 && sVertices[vertex].shade == 0.78f));
+        sawLitGround |= sVertices[vertex].textureLayer == DIORAMA_TERRAIN_TEXTURE_BASE
+                     && sVertices[vertex].shade == 1.0f;
         assert(sVertices[vertex].textureLayer != DIORAMA_TERRAIN_TEXTURE_VERTEX_COLOR);
     }
-    assert(sawBase && sawShadowedGrass);
+    assert(sawBase && sawLitGround);
 }
 
 static void TestAuthoredTreeModelBuildsOnceInLocalSpace(void)

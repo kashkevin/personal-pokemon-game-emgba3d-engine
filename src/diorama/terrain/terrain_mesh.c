@@ -3025,11 +3025,9 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
             if (face->axis != 1 && surface == 0 && IsLedgeBank(cell)
              && LedgeSideLooksBack(cell->behavior, face->axis, face->sign))
                 shade = 0.98f;
-            if (surface == 1 && face->axis == 1 && face->sign > 0
-             && cell->archetype == DIORAMA_ARCHETYPE_GROUPED_HULL
-             && cell->treeHullReady && cell->structureWidth == 2
-             && cell->structureLocalY >= cell->structureHeight - 2)
-                shade = 0.78f;
+            /* (the ground under a voxel tree is lit as the ground beside it: the
+             * flat darkening it had read as a square under every tree - KNOWN_ISSUES
+             * MS-245, the owner's decision #60; the tree's own shadow is the sun's) */
             /* a cave's tunnel is dark inside, as the arch the GBA draws */
             if (InCaveTunnel(cell, &band))
                 shade *= 0.3f;
