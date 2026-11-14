@@ -688,6 +688,8 @@ def interior_specs(spec):
             full.paste(layout.cell_image(layout.metatile(x, y)), (x * 16, y * 16))
     fpx = full.load()
     floors = [layout.cell_image(m).load() for m in room["ground"]]
+    # the floor metatiles' own colours (card_quads: the floor seen through a card's drawing)
+    floor_colours = {f[i, j] for f in floors for j in range(16) for i in range(16)}
     raw = room["pieces"]
     if callable(raw):
         # a room read off its cells (battle_room_auto.py), around the pieces of the rooms
@@ -1031,12 +1033,19 @@ def interior_specs(spec):
             if black is None:
                 art, black = spare_black_texel(art, w, h, sw if sample else 0, sh, set(local))
             parts.append(vb.Void(pc["name"] + "_void", void, black))
-        out.append({"name": "%s_%s" % (spec["name"], pc["name"]), "layout": room["layout"],
-                    "rect": (x0, y0, w, h), "ground": room["ground"], "art": art,
-                    "parts": (lambda ps: (lambda: ps))(parts),
-                    "exact": [(0, 0, w * 16, h * 16)], "interior": spec["name"],
-                    "reuse_in": room.get("reuse_in"), "under": room.get("under"),
-                    "card": bool(pc.get("card")), "wall": bool(pc.get("fill"))})
+        piece_spec = {"name": "%s_%s" % (spec["name"], pc["name"]), "layout": room["layout"],
+                      "rect": (x0, y0, w, h), "ground": room["ground"], "art": art,
+                      "parts": (lambda ps: (lambda: ps))(parts),
+                      "exact": [(0, 0, w * 16, h * 16)], "interior": spec["name"],
+                      "reuse_in": room.get("reuse_in"), "under": room.get("under"),
+                      "card": bool(pc.get("card")), "wall": bool(pc.get("fill"))}
+        if pc.get("card"):
+            quads = card_quads(mine, cells, x0, y0, fpx,
+                               lambda cx, cy: layout.cell_image(layout.metatile(cx, cy), layers=(0,)).load(),
+                               floor_colours)
+            if quads:
+                piece_spec["quads"] = quads
+        out.append(piece_spec)
         # `alone`: a room's own shell - its walls, a doorway's recess - which
         # another room does not repeat by having the same floor along an edge
         if not pc.get("alone"):
@@ -1504,8 +1513,35 @@ def placement_ground(spec, ground_metatile):
     ground), or with "under": "own" each cell's own drawing - where the piece's floor decal leaves a
     hairline at a texel's edge, the same colours show through. Not under a card (a plant, a sign, a
     fence): its cells' drawing is the card's own, and it lay flat on the floor under it, seen past it
-    from any camera steeper than the drawing's 45 degrees (the object audit of 2026-11-14)."""
-    return OWN_GROUND if spec.get("under") == "own" and not spec.get("card") else ground_metatile
+    from any camera steeper than the drawing's 45 degrees (the object audit of 2026-11-14). A card
+    drawn on its cells' upper layer alone (`quads`: card_quads) lies on their own lower layer - the
+    floor's own pattern under it, which the room's one floor metatile is not on a checkered floor
+    (the Battle Dome's lobby: half its plants' cells were the other square's)."""
+    if spec.get("under") != "own":
+        return ground_metatile
+    if spec.get("card"):
+        return OWN_GROUND if spec.get("quads") else ground_metatile
+    return OWN_GROUND
+
+
+def card_quads(mine, cells, x0, y0, full, lower_of, floor_colours=()):
+    """{(i, j): 0xF} for a card's cells - the lower layer alone under it - when every pixel the card
+    claims (`mine`, the room's pixels; `full` the room's drawing) is drawn by its cell's upper layer
+    (`lower_of(cx, cy)`: that cell's lower layer, a 16 x 16 pixel access), so that layer holds the
+    floor under the card and nothing of it; {} otherwise (the room's floor under it, as before). A
+    pixel the lower layer draws in one of the floor's own colours (`floor_colours`) is the floor seen
+    through the card's drawing (between a rope post's highlights), not the card."""
+    cells = set(cells)
+    lowers = {}
+    for (x, y) in mine:
+        c = (x // 16, y // 16)
+        if c not in cells:
+            return {}
+        if c not in lowers:
+            lowers[c] = lower_of(*c)
+        if lowers[c][x % 16, y % 16] == full[x, y] and full[x, y] not in floor_colours:
+            return {}    # drawn on the lower layer: under the card it would lie flat
+    return {(cx - x0, cy - y0): 0xF for (cx, cy) in sorted(cells)} if mine else {}
 
 
 def find_placements(model, layouts_json):

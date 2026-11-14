@@ -92,6 +92,52 @@ class PlacementGroundTests(unittest.TestCase):
         self.assertEqual(g.placement_ground({"under": None, "card": False}, 0x201), 0x201)
         self.assertEqual(g.placement_ground({}, 0x23A), 0x23A)
 
+    def test_a_card_on_its_cells_upper_layer_lies_on_their_lower(self):
+        # the Battle Dome's lobby: a checkered floor, each cell's own square under the plant
+        self.assertEqual(g.placement_ground({"under": "own", "card": True, "quads": {(0, 0): 0xF}}, 0x340),
+                         g.OWN_GROUND)
+        self.assertEqual(g.placement_ground({"under": None, "card": True, "quads": {(0, 0): 0xF}}, 0x340),
+                         0x340)
+
+
+class CardQuadsTests(unittest.TestCase):
+    """gen_voxel_buildings.card_quads: a card lies on its cells' lower layer only when the upper draws
+    all of it."""
+
+    FLOOR, PLANT = (10, 200, 150, 255), (40, 120, 30, 255)
+
+    def room(self, plant_on_lower):
+        # one cell, 16 x 16: the plant's pixels at x 4-11, rows 2-13, over the floor
+        full, lower = {}, {}
+        for y in range(16):
+            for x in range(16):
+                plant = 4 <= x < 12 and 2 <= y < 14
+                full[x, y] = self.PLANT if plant else self.FLOOR
+                lower[x, y] = self.PLANT if plant and plant_on_lower else self.FLOOR
+        mine = [(x, y) for y in range(2, 14) for x in range(4, 12)]
+        return mine, full, lower
+
+    def test_drawn_on_the_upper_layer(self):
+        mine, full, lower = self.room(False)
+        self.assertEqual(g.card_quads(mine, [(0, 0)], 0, 0, full, lambda cx, cy: lower), {(0, 0): 0xF})
+
+    def test_drawn_on_the_lower_layer(self):
+        mine, full, lower = self.room(True)
+        self.assertEqual(g.card_quads(mine, [(0, 0)], 0, 0, full, lambda cx, cy: lower), {})
+
+    def test_the_floor_seen_through_it(self):
+        # a rope post's drawing with the floor showing between its highlights: that pixel is the
+        # floor's on both layers, and the card still lies on the lower layer
+        mine, full, lower = self.room(False)
+        full[6, 5] = lower[6, 5] = self.FLOOR
+        self.assertEqual(g.card_quads(mine, [(0, 0)], 0, 0, full, lambda cx, cy: lower,
+                                      {self.FLOOR}), {(0, 0): 0xF})
+        self.assertEqual(g.card_quads(mine, [(0, 0)], 0, 0, full, lambda cx, cy: lower), {})
+
+    def test_a_pixel_outside_its_cells(self):
+        mine, full, lower = self.room(False)
+        self.assertEqual(g.card_quads(mine + [(20, 3)], [(0, 0)], 0, 0, full, lambda cx, cy: lower), {})
+
 
 if __name__ == "__main__":
     unittest.main()

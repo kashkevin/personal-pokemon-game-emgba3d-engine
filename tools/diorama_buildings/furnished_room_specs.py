@@ -904,6 +904,104 @@ def dome_corridor():
     ])
 
 
+# ── The Pokemon League 1F (Ever Grande City) ───────────────────────────────
+#
+# 19 x 12 cells, the Pokemon Center's tiles in a wider room, with no model of its own until the object
+# audit of 2026-11-14: only the Center's machines, tables, stools, plants and escalator stood (the
+# Center's pieces, found by their tiles); its back wall and its two counters lay drawn on the floor, the
+# nurse and the clerk seen whole over a low strip (V). As the Center's: the back wall standing its
+# drawn face (rows 0-30, its foot row 32) with its chamfered corners and the side walls the drawing
+# never shows; the doorway on to the Elite Four (x 142-178, its dark from row 7, walked into) cut out
+# of it under its lintel; the two L counters - the nurse's (x 0-95) and the clerk's (x 225-304), each a
+# bar (its top rows 45-52, its trim and lavender front rows 53-62: 10 rows, the Center's counter's
+# height, which the Center's Poke Balls standing on them here are made for) and an arm from the
+# wall's foot (row 32; its top's end drawn over the wall's baseboard is the wall's, painted on it, as
+# the Department Store's).
+
+LEAGUE_WALL_SIDE = (112, 0, 128, 32)     # a plain panel of the back wall, band to foot
+
+
+def league_1f():
+    facet, own_shell, piece = _helpers()
+    nurse = [(80, 32, 95, 63), (0, 45, 95, 63)]
+    clerk = [(225, 32, 240, 63), (225, 45, 304, 63)]
+    return own_shell([
+        piece("counter_w", nurse, 10, claim=nurse),
+        piece("counter_e", clerk, 10, claim=clerk),
+        facet("corner_w", (0, 15, 47), (16, -1, 31), 32, walls=[((0, 192), (0, 47))],
+              side=LEAGUE_WALL_SIDE, cells=[(0, 11)]),
+        facet("corner_e", (288, -1, 31), (304, 15, 47), 32, walls=[((304, 47), (304, 192))],
+              side=LEAGUE_WALL_SIDE, cells=[(18, 11)]),
+        piece("wall_w", [(16, 0, 142, 32), (142, 0, 178, 7)], 32, fill=16, foot=32, side=LEAGUE_WALL_SIDE),
+        piece("wall_e", [(178, 0, 288, 32)], 32, fill=16, side=LEAGUE_WALL_SIDE),
+    ])
+
+
+# ── The Battle Dome's lobby ─────────────────────────────────────────────────
+#
+# 23 x 17 cells, no model until the object audit of 2026-11-14: its wall, counters and rope barriers lay
+# drawn on the floor. The back wall (rows 0-80: a white band, pale panels, pillars, a red baseboard -
+# 80 rows, as drawn) with its two doors painted on it (x 72-104 and 264-296: the attendants walk the
+# player into them, as the Battle Tents' door). Each side, mirrored: an L counter round its attendant -
+# an arm with an angled end (x 32-56 or 312-336, rows 112-160) and a bar (x 32-80 or 288-336, its top
+# to row 168, its front rows 169-175: 7 rows) - with a display on the bar (x 64-80 or 288-304); a short
+# counter (x 96-144 or 224-272, 7 rows of front) with a terminal or a glass case on it. Between them
+# the PC (x 176-192) and the rope barriers round it, and two more against the side walls: thin posts
+# and ropes, cards. The potted plants by the entrance are cards; the mats are the floor's.
+
+DOME_FLOOR = ("8bcdac", "9ceecd", "7bac8b")
+DOME_WALL_SIDE = (160, 0, 176, 80)       # a plain panel of the back wall, band to baseboard
+# the counters' yellow top and white edge round what stands on them
+DOME_COUNTER = ("ffde83", "ffffff")
+DOME_PLANTS = [(1, 13), (2, 13), (3, 13), (4, 13), (19, 13), (20, 13), (21, 13), (22, 13),
+               (1, 15), (2, 15), (17, 15), (18, 15), (19, 15), (20, 15), (21, 15), (22, 15)]
+
+
+def dome_lobby():
+    facet, own_shell, piece = _helpers()
+    plants = [piece("plant_%d_%d" % (cx, cy), [(cx * 16, cy * 16, cx * 16 + 16, cy * 16 + 32)], 28,
+                    leave=DOME_FLOOR, card=True) for (cx, cy) in DOME_PLANTS]
+    l_west = [(32, 112, 56, 176), (32, 160, 80, 176)]
+    l_east = [(312, 112, 336, 176), (288, 160, 336, 176)]
+    return own_shell(plants + [
+        piece("display_w", [(64, 148, 80, 168)], 12, base=7, leave=DOME_COUNTER),
+        piece("display_e", [(288, 148, 304, 168)], 12, base=7, leave=DOME_COUNTER),
+        piece("terminal_w", [(112, 148, 128, 168)], 12, base=7, leave=DOME_COUNTER),
+        piece("case_e", [(233, 145, 263, 168)], 8, base=7, leave=DOME_COUNTER),
+        piece("counter_w", l_west, 7, claim=l_west),
+        piece("counter_e", l_east, 7, claim=l_east),
+        piece("desk_w", [(96, 155, 144, 176)], 7, claim=[(96, 155, 144, 176)]),
+        piece("desk_e", [(224, 155, 272, 176)], 7, claim=[(224, 155, 272, 176)]),
+        piece("pc", [(176, 136, 192, 168)], 24, leave=DOME_FLOOR),
+        piece("ropes_n", [(144, 127, 224, 144)], 16, leave=DOME_FLOOR, card=True),
+        piece("ropes_s", [(144, 159, 224, 176)], 16, leave=DOME_FLOOR, card=True),
+        piece("ropes_w", [(0, 159, 32, 176)], 16, leave=DOME_FLOOR, card=True),
+        piece("ropes_e", [(336, 159, 368, 176)], 16, leave=DOME_FLOOR, card=True),
+        piece("wall", [(0, 0, 368, 80)], 80, fill=16, side=DOME_WALL_SIDE),
+        piece("side_w", [], 80, side=DOME_WALL_SIDE, walls=[((0, 272), (0, 80))]),
+        piece("side_e", [], 80, side=DOME_WALL_SIDE, walls=[((368, 80), (368, 272))]),
+    ])
+
+
+# ── The Battle Palace's corridor ─────────────────────────────────────────────
+#
+# 17 x 14 cells, no model until the object audit of 2026-11-14: its back wall lay drawn on the floor.
+# The wall (rows 0-64: the orange face with its arched windows between golden pillars) with the two
+# doors to the battle rooms painted on it (x 88-120 and 152-184: the attendant walks the player into
+# them, as the Palace lobby's). The walkway's stone kerbs, the flower beds and the water either side are
+# the floor's (the flowers stand as the props they are); the room's sides are the water's edge, open
+# as drawn: no side walls.
+
+PALACE_CORRIDOR_WALL_SIDE = (48, 0, 64, 64)     # a plain stretch of the wall, top to foot
+
+
+def palace_corridor():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("wall", [(0, 0, 272, 64)], 64, fill=16, side=PALACE_CORRIDOR_WALL_SIDE),
+    ])
+
+
 # ── Lilycove's Contest Lobby ───────────────────────────────────────────────
 #
 # 31 x 12 cells, no model until the object audit of 2026-11-14. The back wall (rows 0-32: a red
@@ -1604,6 +1702,21 @@ def furnished_room_specs():
             "name": "dome_corridor",
             "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_DOME_CORRIDOR", "ground": [0x340, 0x341],
                          "under": "own", "reuse_in": frozenset(), "pieces": dome_corridor()},
+        },
+        {
+            "name": "league_1f",
+            "interior": {"layout": "LAYOUT_EVER_GRANDE_CITY_POKEMON_LEAGUE_1F", "ground": [0x240],
+                         "under": "own", "reuse_in": frozenset(), "pieces": league_1f()},
+        },
+        {
+            "name": "dome_lobby",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_DOME_LOBBY", "ground": [0x340, 0x341],
+                         "under": "own", "reuse_in": frozenset(), "pieces": dome_lobby()},
+        },
+        {
+            "name": "palace_corridor",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_PALACE_CORRIDOR", "ground": [0x201],
+                         "under": "own", "reuse_in": frozenset(), "pieces": palace_corridor()},
         },
         {
             "name": "safari_rest_house",
