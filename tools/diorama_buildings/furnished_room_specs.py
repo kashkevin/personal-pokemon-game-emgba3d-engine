@@ -357,13 +357,22 @@ def hall_of_fame():
 
 # ── Lilycove Department Store's rooftop ───────────────────────────────────
 #
-# 18 x 12 cells, open to the sky, a railing round it (left drawn on the floor, as thin as it is).
+# 18 x 12 cells, open to the sky, a railing round it. Until the object audit of 2026-11-14 the
+# railing lay drawn on the floor; now it stands (the owner: railings with real thickness and
+# joined corners): the north and south rails, drawn from the front - an orange handrail over grey
+# balusters - stand their drawn face (rows 8-22, 103-118), and the rails down the sides, drawn as
+# their handrail's line from above, stand as boxes as tall (14 rows) and as thick as the line (6-7
+# pixels): the west rail (x 9-16) from the north rail to the south, the short rail beside the
+# stairwell's hut (x 245-251), the stretch east of it (x 250-278, drawn from the front, rows 42-56)
+# and the east rail (x 272-278) down to the south rail. Their sides, which the drawing never shows,
+# carry a stretch of the north rail's balusters.
 # Two drinks machines (x 144-176, rows 0-30) against the north railing, the stairwell's hut
 # (x 192-240, rows 16-64: its white roof, its front with the dark way down), two planters down
 # the west railing (x 16-48), two benches (x 80-112, x 144-176, rows 80-96) and two chairs
 # (x 256-272) - nothing walked on but the floor.
 
 ROOF_FLOOR = ("8b8b8b", "b4b4a4", "b4de8b", "d5ded5", "9cd57b")
+ROOF_RAIL_SIDE = (32, 8, 48, 22)    # the north rail: a handrail over two balusters
 
 
 def rooftop():
@@ -377,6 +386,451 @@ def rooftop():
         piece("planter_s", [(16, 72, 48, 96)], 10, leave=ROOF_FLOOR),
         piece("machines", [(144, 0, 176, 30)], 22),
         piece("hut", [(192, 16, 240, 64)], 24),
+        # the rails: down the sides first (their corners theirs), then along the rows
+        piece("rail_w", [(9, 8, 16, 118)], 14, side=ROOF_RAIL_SIDE),
+        piece("rail_hut", [(245, 8, 251, 42)], 14, side=ROOF_RAIL_SIDE),
+        piece("rail_e", [(272, 42, 279, 118)], 14, side=ROOF_RAIL_SIDE),
+        piece("rail_n", [(16, 8, 245, 22)], 14, side=ROOF_RAIL_SIDE),
+        piece("rail_ne", [(251, 42, 272, 56)], 14, side=ROOF_RAIL_SIDE),
+        piece("rail_s", [(16, 103, 272, 118)], 15, side=ROOF_RAIL_SIDE),
+    ])
+
+
+# ── Lilycove Department Store's floors ────────────────────────────────────
+#
+# 18 x 8 cells each, the Mart's Shop tiles, no model until now: the back wall, the lift, the
+# counters and the coolers lay drawn on the floor (the 3D object audit of 2026-11-14). From the top
+# of the drawing, on every floor:
+#
+#     rows  0- 32  the back wall: a grey top band (rows 0-8) and its face (rows 8-32, pale panels
+#                  over a salmon baseboard), its whole drawn height standing; on it the lift (x
+#                  24-56, its doors walked into: painted on the wall, as the Palace's door) and
+#                  windows, a clock, a glass case or an emblem; the floor's sign under the lift
+#                  (rows 30-42) is the floor's
+#     doorways     the stairs and the door the player walks into (cells 13,1 and 16,1): cut out
+#                  of the wall under their lintels (rows 0-13), their drawing seen through them
+#     sides        the side walls the drawing never shows, dressed with a plain panel
+#
+# 1F, 3F and 5F: a counter before the wall round the clerks (the floor between them and the wall
+# theirs): its arms from the wall's foot (rows 32-54, their fronts rows 54-64), the bar or glass
+# case between them (its top rows 44-54, its front 54-64) - 10 rows; a till on the west arm and a
+# till on the east (rows 26-44), each 8 rows on the counter. 1F: two produce stands down the west
+# wall (x 0-32: their fronts 10 rows, the vegetables their top) and three plants (its two stools
+# are the Center's, tile for tile, and stand as they are). 5F: an L counter at the east (x 224-288: its arm rows 76-128, its glass case rows 76-96).
+# 2F: a U counter round the clerks (x 96-192): its arms' tops rows 77-118 and fronts 118-128, the
+# glass case between them its top rows 78-86 and its front 86-96 - 10 rows, the clerks seen over
+# it; a till on the west arm; two potted plants (x 272-288): cards. The coolers each side (x 32-64,
+# x 224-256) are the Mart's display stands, tile for tile, and stand here as they are
+# (gen_voxel_buildings.reuse_pieces).
+
+STORE_GREEN = ("a4eebd", "9cd57b", "ffffff", "b4b4a4", "cdffd5", "d5ded5", "b4de8b", "8b8b8b")
+STORE_WALL_SIDE = (64, 0, 80, 32)      # a plain panel of the back wall, band to baseboard
+
+
+# The doorways' openings as drawn (inside their frames' posts), under their lintels (rows 0-13):
+# cell 13's x 211-222 and cell 16's x 262-274
+STORE_OPENINGS = {13: (211, 222), 16: (262, 274)}
+
+
+def _store_walls(doorways, east_from=32):
+    """The back wall, standing its drawn face (32 rows) on its foot, row 32, the doorways the player
+    walks into (cells `doorways`) cut out of it under their lintels - the lintel in the wall, so its
+    top runs on unbroken (set back to the doorway's top, as battle_room_auto stands one, the wall's
+    top had a black notch over each doorway); and the side walls, from the back wall's foot to the
+    front."""
+    facet, own_shell, piece = _helpers()
+    walls, x = [], 0
+    for n, cell in enumerate(sorted(doorways)):
+        a, b = STORE_OPENINGS[cell]
+        walls.append(piece("wall_%d" % n, [(x, 0, a, 32), (a, 0, b, 13)], 32, fill=16, foot=32,
+                           side=STORE_WALL_SIDE))
+        x = b
+    walls.append(piece("wall_%d" % len(doorways), [(x, 0, 288, 32)], 32, fill=16, side=STORE_WALL_SIDE))
+    return walls + [
+        piece("side_w", [], 32, side=STORE_WALL_SIDE, walls=[((0, 128), (0, 32))]),
+        piece("side_e", [], 32, side=STORE_WALL_SIDE, walls=[((288, east_from), (288, 128))]),
+    ]
+
+
+def U_SHAPE(west, east):
+    return [(west, 77, west + 16, 128), (east, 77, east + 16, 128), (west + 16, 77, east, 96)]
+
+
+def WALL_SHAPE(west, east):
+    return [(west, 32, west + 16, 64), (east, 32, east + 16, 64), (west + 16, 44, east, 64)]
+
+
+def _u_counter(west, east, floor):
+    """A U counter in the room (2F, 4F): its arms (x west and east, 16 wide) rows 77-128, the glass
+    case between them rows 77-96, 10 rows of front; the till on the west arm, before the counter
+    it stands on (a piece claims what no piece before it has)."""
+    facet, own_shell, piece = _helpers()
+    return [
+        piece("till", [(west + 2, 102, west + 16, 118)], 8, base=10, leave=floor),
+        # the whole counter its own: its top is drawn in the floor's own pale green and white,
+        # and the floor's colours ran into the west arm past the till
+        piece("counter", U_SHAPE(west, east), 10, claim=U_SHAPE(west, east)),
+    ]
+
+
+def _wall_counter(west, east, floor):
+    """A counter before the back wall (1F, 3F, 5F): its arms from the wall's foot, rows 32-64, the
+    bar or glass case between them rows 44-64, 10 rows of front; a till on each arm."""
+    facet, own_shell, piece = _helpers()
+    return [
+        piece("till_w", [(west + 2, 38, west + 16, 54)], 8, base=10, leave=floor),
+        piece("till_e", [(east + 2, 26, east + 16, 44)], 8, base=10, leave=floor),
+        # the arms from the wall's foot: their tops' ends drawn over the wall's baseboard (rows
+        # 24-32) are the wall's, painted on it (standing there, the arm's top met the wall's
+        # face and the room did not give back its drawing)
+        piece("counter", WALL_SHAPE(west, east), 10, claim=WALL_SHAPE(west, east)),
+    ]
+
+
+STORE_ORANGE = ("f6c539", "e69c39", "f6e673", "cd8320", "ac5a20")
+STORE_CREAM = ("ffffcd", "dedea4", "ffc5ac", "cdffcd", "acdeb4", "e6a483", "bdbd83")
+
+
+def store_1f():
+    facet, own_shell, piece = _helpers()
+    # the stands' fronts are drawn in the floor's own oranges: each claims its whole shape
+    stands = [piece("stand_%d" % z0, [(0, z0, 32, z0 + 24)], 10, claim=[(0, z0, 32, z0 + 24)])
+              for z0 in (72, 104)]
+    plants = [piece("plant_%d" % x0, [(x0, 96, x0 + 16, 128)], 28, leave=STORE_ORANGE, card=True)
+              for x0 in (224, 256, 272)]
+    return own_shell(stands + plants + _wall_counter(96, 176, STORE_ORANGE)
+                     + _store_walls((16,)))
+
+
+def store_2f():
+    facet, own_shell, piece = _helpers()
+    plants = [piece("plant_%d" % z0, [(272, z0, 288, z0 + 32)], 28, leave=STORE_GREEN, card=True)
+              for z0 in (48, 96)]
+    return own_shell(plants + _u_counter(96, 176, STORE_GREEN)
+                     + _store_walls((13, 16)))
+
+
+def store_3f():
+    return own_shell_of(_wall_counter(96, 176, STORE_GREEN)
+                        + _store_walls((13, 16)))
+
+
+def _short_coolers(xs, floor):
+    """The shorter coolers of 4F and 5F (two cells deep, rows 79-112): the Mart's display stands
+    without their middle row of goods, cut as the Mart cuts those - a stand per cell's width, 14
+    rows of front, its goods its top, back to where its collision starts (row 80)."""
+    facet, own_shell, piece = _helpers()
+    return [piece("cooler_%d" % x0, [(x0, 79, x0 + 16, 112)], 14, back=80, leave=floor) for x0 in xs]
+
+
+def store_4f():
+    return own_shell_of(_short_coolers((16, 32, 208, 224, 240, 256), STORE_GREEN)
+                        + _u_counter(96, 160, STORE_GREEN)
+                        + _store_walls((13, 16)))
+
+
+def store_5f():
+    facet, own_shell, piece = _helpers()
+    return own_shell(_short_coolers((96, 112, 160, 176), STORE_CREAM)
+                     + _wall_counter(80, 176, STORE_CREAM) + [
+        piece("counter_ne", [(224, 76, 240, 128), (240, 76, 288, 96)], 10, leave=STORE_CREAM),
+    ] + _store_walls((13, 16), east_from=96))
+
+
+def own_shell_of(pieces):
+    facet, own_shell, piece = _helpers()
+    return own_shell(pieces)
+
+
+# ── Lilycove Museum ───────────────────────────────────────────────────────
+#
+# No model until the object audit of 2026-11-14: its walls, the paintings on them and its exhibits
+# lay drawn on the floor (the paintings slanted with the floor from the player's camera).
+#
+# 1F, 21 x 14 cells. The back wall (rows 0-32: a cream face, a white line, a pink baseboard) with
+# its paintings and the stairs up (cell 16,1, cut out of it under its lintel); a partition from it (x 208-224), drawn as its top (rows 0-48) and its south end (rows
+# 48-80): a wall 32 rows tall, 16 thick, to row 80; the gallery wall (x 0-144, rows 72-112: its
+# top rows 72-80, its face with two paintings rows 80-112 - 8 thick) turning south at x 144-160
+# (its top rows 72-112, its end rows 112-144); a display platform (x 240-320: its top rows 110-150,
+# its front 150-160) with a reclining sculpture on it (x 256-304, rows 112-136); two statues
+# (cards); a low rope barrier round an exhibit space (x 16-112, rows 157-224: 8 rows tall, its four
+# sides meeting at the corners - the sides down the columns first, so they reach the north side's
+# face).
+#
+# 2F, 22 x 13 cells. The back wall (rows 0-32), the stairs down (cell 13,1); the wall stands a cell
+# further forward at both ends (x 0-64, x 288-352: its top rows 0-16, its face rows 16-48); a statue
+# on a pedestal either side of the stairs (x 168-192, x 232-256, rows 14-48: cards before the
+# wall); five display cabinets (x 64 wide), each its painting on its front - 24 rows, standing on
+# the edge of its collision (rows 88-112 and 152-176), the light strip of its base in front of it
+# the floor's (the walkable row before it) - and its top the 16 rows above.
+
+MUSEUM_FLOOR = ("e6e68b", "ffffcd", "decd73", "cdb462", "7b6229")
+MUSEUM_WALL = ("e6e68b", "eeac94", "414a6a", "cdb462", "7b6229", "ffffff", "d5947b")
+MUSEUM_WALL_SIDE = (112, 0, 128, 32)      # a plain stretch of the back wall, top to baseboard
+MUSEUM2_FLOOR = ("e6e6e6", "c5c5c5", "9c9c9c", "d5d5d5", "b4b4b4")
+MUSEUM2_WALL = ("9cbdac", "739483", "4a6a5a", "525252", "c5c5c5")
+MUSEUM2_WALL_SIDE = (96, 0, 112, 32)
+
+
+def museum_1f():
+    facet, own_shell, piece = _helpers()
+    # the back wall either side of the partition, the stairs (cell 16,1) cut out of it under their
+    # lintel (rows 0-8): the lintel in the wall, so its top runs on unbroken
+    walls = [piece("wall_w", [(0, 0, 208, 32)], 32, fill=16, side=MUSEUM_WALL_SIDE),
+             piece("wall_e", [(224, 0, 255, 32), (255, 0, 273, 8), (273, 0, 336, 32)], 32, fill=16,
+                   foot=32, side=MUSEUM_WALL_SIDE)]
+    return own_shell([
+        # the sculpture before the platform it lies on (a piece claims what no piece before it has)
+        piece("sculpture", [(256, 112, 304, 136)], 12, base=10, leave=MUSEUM_FLOOR),
+        piece("platform", [(240, 110, 320, 160)], 10, leave=MUSEUM_FLOOR),
+        piece("statue_w", [(240, 176, 256, 208)], 32, leave=MUSEUM_FLOOR, card=True),
+        piece("statue_e", [(288, 176, 304, 192)], 16, leave=MUSEUM_FLOOR, card=True),
+        # the barrier's cream is the floor's own: each side claims its whole shape
+        piece("barrier_w", [(16, 160, 32, 216)], 8, claim=[(16, 160, 32, 216)]),
+        piece("barrier_e", [(96, 160, 112, 216)], 8, claim=[(96, 160, 112, 216)]),
+        piece("barrier_n", [(16, 157, 112, 176)], 8, claim=[(16, 157, 112, 176)]),
+        piece("barrier_s", [(16, 208, 112, 224)], 8, claim=[(16, 208, 112, 224)]),
+        piece("partition_n", [(208, 0, 224, 80)], 32, side=MUSEUM_WALL_SIDE),
+        piece("partition_gallery_e", [(144, 72, 160, 144)], 32, side=MUSEUM_WALL_SIDE),
+        piece("partition_gallery", [(0, 72, 144, 112)], 32, side=MUSEUM_WALL_SIDE),
+        piece("side_w", [], 32, side=MUSEUM_WALL_SIDE, walls=[((0, 224), (0, 32))]),
+        piece("side_e", [], 32, side=MUSEUM_WALL_SIDE, walls=[((336, 32), (336, 224))]),
+    ] + walls)
+
+
+def museum_2f():
+    facet, own_shell, piece = _helpers()
+    # the back wall, the stairs (cell 13,1) cut out of it under their arch's top (rows 0-8)
+    walls = [piece("wall_w", [(64, 0, 208, 32), (208, 0, 224, 8)], 32, fill=16, foot=32,
+                   side=MUSEUM2_WALL_SIDE),
+             piece("wall_e", [(224, 0, 288, 32)], 32, fill=16, side=MUSEUM2_WALL_SIDE)]
+    cabinets = [piece("cabinet_%d_%d" % (x0, z0), [(x0, z0 - 40, x0 + 64, z0)], 24,
+                      leave=MUSEUM2_FLOOR)
+                for (x0, z0) in ((16, 112), (144, 112), (272, 112), (80, 176), (208, 176))]
+    return own_shell(cabinets + [
+        piece("statue_w", [(168, 14, 192, 48)], 34, leave=MUSEUM2_WALL + MUSEUM2_FLOOR, card=True),
+        piece("statue_e", [(232, 14, 256, 48)], 34, leave=MUSEUM2_WALL + MUSEUM2_FLOOR, card=True),
+        piece("wall_cw", [(0, 0, 64, 48)], 32, fill=16, side=MUSEUM2_WALL_SIDE),
+        piece("wall_ce", [(288, 0, 352, 48)], 32, fill=16, side=MUSEUM2_WALL_SIDE),
+        piece("side_w", [], 32, side=MUSEUM2_WALL_SIDE, walls=[((0, 208), (0, 48))]),
+        piece("side_e", [], 32, side=MUSEUM2_WALL_SIDE, walls=[((352, 48), (352, 208))]),
+    ] + walls)
+
+
+# ── The harbors (Lilycove's and Slateport's) ──────────────────────────────
+#
+# One layout, 24 x 15 cells, no model until the object audit of 2026-11-14: its back wall and the
+# railing round the dock lay drawn on the floor. The back wall (rows 0-64: its top band rows 0-8,
+# its face with windows rows 8-64 - 56 rows, a warehouse wall); the railing round the dock's water,
+# 16 rows tall: its north rail at the water's edge (rows 64-80, before the wall), its west rail
+# drawn as its handrail from above (x 48-56, a box from the north rail's face to the south rail's),
+# its south rail either side of the boarding gap (rows 160-176), the crate yard's rail (x 272-280)
+# and the crates (x 280-384) as one stack, 16 rows. The water is the terrain's.
+
+HARBOR_FLOOR = ("8bb4ac", "a4cdbd", "628b83", "739c8b", "9c8b94", "62627b")
+HARBOR_WALL_SIDE = (16, 0, 32, 64)
+HARBOR_RAIL_SIDE = (64, 64, 80, 80)       # the north rail: its handrail over two balusters
+
+
+def harbor():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("rail_w", [(48, 64, 56, 176)], 16, side=HARBOR_RAIL_SIDE),
+        piece("rail_yard", [(272, 160, 280, 240)], 16, side=HARBOR_RAIL_SIDE),
+        piece("rail_n", [(56, 64, 384, 80)], 16, side=HARBOR_RAIL_SIDE),
+        piece("rail_sw", [(56, 160, 112, 176)], 16, side=HARBOR_RAIL_SIDE),
+        piece("rail_se", [(152, 160, 272, 176)], 16, side=HARBOR_RAIL_SIDE),
+        piece("crates", [(280, 160, 384, 240)], 16, side=HARBOR_RAIL_SIDE),
+        piece("wall", [(0, 0, 384, 64)], 56, fill=16, side=HARBOR_WALL_SIDE),
+        piece("side_w", [], 56, side=HARBOR_WALL_SIDE, walls=[((0, 240), (0, 64))]),
+    ])
+
+
+# ── The Seaside Cycling Road's gates ──────────────────────────────────────
+#
+# One layout, 15 x 6 cells, the store's Shop tiles: the back wall (rows 0-32, a clock and a notice on
+# it), a counter before it as the store's 1F (arms x 80-96 and 160-176 from the wall's foot, the bar
+# between them rows 44-64, 10 rows), two produce stands (x 96-160, rows 72-96: 10 rows), two plants.
+
+def cycling_gate():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("stand_w", [(96, 72, 128, 96)], 10, claim=[(96, 72, 128, 96)]),
+        piece("stand_e", [(128, 72, 160, 96)], 10, claim=[(128, 72, 160, 96)]),
+        piece("plant_w", [(0, 64, 16, 96)], 28, leave=STORE_ORANGE, card=True),
+        piece("plant_e", [(224, 64, 240, 96)], 28, leave=STORE_ORANGE, card=True),
+        piece("counter", [(80, 32, 96, 64), (160, 32, 176, 64), (96, 44, 160, 64)], 10,
+              leave=STORE_ORANGE),
+        piece("wall", [(0, 0, 240, 32)], 32, fill=16, side=STORE_WALL_SIDE),
+        piece("side_w", [], 32, side=STORE_WALL_SIDE, walls=[((0, 96), (0, 32))]),
+        piece("side_e", [], 32, side=STORE_WALL_SIDE, walls=[((240, 32), (240, 96))]),
+    ])
+
+
+# ── The cable car stations (Route 112's and Mt. Chimney's) ────────────────
+#
+# One layout, 13 x 12 cells, no model until the object audit of 2026-11-14: its back wall, the
+# railings round the two boarding pits, the sign over them, the ticket machine and the bin lay
+# drawn on the floor. The back wall (rows 0-32, its pillars painted); the yellow platform and the
+# dark track before it are the floor's; each pit (x 0-96 and 112-208, rows 72-118) has a rail on its
+# north side (rows 72-82: 10 rows), one down its side by the walkway between them (a strip from
+# above, a box 10 rows tall reaching the north rail) and one on its south side (rows 104-118: 14
+# rows); the sign stands on the west pit's north rail (x 32-80, rows 66-82: a card); the ticket
+# machine (x 192-208, rows 112-144: 24 rows of front), the bin (rows 146-170) and two benches (x
+# 0-16: 6 rows, walked on) stand on the floor.
+
+STATION_FLOOR = ("acb4bd", "8b94a4", "dedede", "de4a00", "414a6a", "62627b")
+STATION_WALL_SIDE = (40, 0, 56, 32)
+STATION_RAIL_SIDE = (8, 104, 24, 118)     # the south rail: its handrail over a baluster
+
+
+def cable_car_station():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("sign", [(32, 66, 80, 82)], 16, leave=STATION_FLOOR, card=True),
+        piece("rail_side_w", [(88, 72, 96, 118)], 10, side=STATION_RAIL_SIDE),
+        piece("rail_side_e", [(112, 72, 120, 118)], 10, side=STATION_RAIL_SIDE),
+        piece("rail_nw", [(0, 72, 88, 82)], 10, side=STATION_RAIL_SIDE),
+        piece("rail_ne", [(120, 72, 208, 82)], 10, side=STATION_RAIL_SIDE),
+        piece("rail_sw", [(0, 104, 88, 118)], 14, side=STATION_RAIL_SIDE),
+        piece("rail_se", [(120, 104, 208, 118)], 14, side=STATION_RAIL_SIDE),
+        piece("machine", [(192, 112, 208, 144)], 24, leave=STATION_FLOOR),
+        piece("bin", [(192, 146, 208, 170)], 16, leave=STATION_FLOOR),
+        piece("bench_n", [(0, 120, 16, 144)], 6, leave=STATION_FLOOR),
+        piece("bench_s", [(0, 146, 16, 176)], 6, leave=STATION_FLOOR),
+        piece("wall", [(0, 0, 208, 32)], 32, fill=16, side=STATION_WALL_SIDE),
+        piece("side_w", [], 32, side=STATION_WALL_SIDE, walls=[((0, 192), (0, 32))]),
+        piece("side_e", [], 32, side=STATION_WALL_SIDE, walls=[((208, 32), (208, 192))]),
+    ])
+
+
+# ── The Battle Tents' lobby (Fallarbor's, Slateport's, Verdanturf's) ───────
+#
+# One layout, 13 x 10 cells, no model until the object audit of 2026-11-14: its counters, the
+# display table and the terminal lay drawn on the floor. The back wall (rows 0-30, the door to the
+# battles painted on it, as the Palace's: the attendant walks the player into it); the tent's
+# curtains down both sides (x 0-30 and 176-208) stand as side walls at x 16 and 192, dressed with
+# the curtain; two C counters round the attendants (x 32-96 and 112-176, their bottom arms rows
+# 76-96: 8 rows of front, the yellow their top); the glass display table before the west counter
+# (x 56-90, rows 78-104) and the terminal by the east curtain (x 176-192, rows 56-92, 28 rows).
+
+TENT_FLOOR = ("cdd5ff", "b4acf6")
+TENT_WALL_SIDE = (40, 0, 56, 30)
+TENT_CURTAIN = (0, 30, 16, 62)
+
+
+def tent_lobby():
+    facet, own_shell, piece = _helpers()
+    west = [(32, 30, 64, 48), (32, 48, 48, 76), (32, 76, 96, 96)]
+    east = [(144, 30, 176, 48), (160, 48, 176, 76), (112, 76, 176, 96)]
+    return own_shell([
+        piece("table", [(56, 78, 90, 104)], 12, leave=TENT_FLOOR),
+        piece("terminal", [(176, 56, 192, 92)], 28, leave=TENT_FLOOR),
+        piece("counter_w", west, 8, claim=west),
+        piece("counter_e", east, 8, claim=east),
+        piece("wall", [(0, 0, 208, 30)], 30, fill=16, side=TENT_WALL_SIDE),
+        piece("side_w", [], 30, side=TENT_CURTAIN, walls=[((16, 160), (16, 30))]),
+        piece("side_e", [], 30, side=TENT_CURTAIN, walls=[((192, 30), (192, 160))]),
+    ])
+
+
+# ── Lilycove's Contest Lobby ───────────────────────────────────────────────
+#
+# 31 x 12 cells, no model until the object audit of 2026-11-14. The back wall (rows 0-32: a red
+# curtain wall, frames and posters on it), its two doorways to the halls (cells 9,1 and 21,1, walked
+# into) cut out under their curtains (rows 0-14, the openings x 141-161 and 333-353); the reception
+# counter (x 176-304): its arms from the wall (rows 26-64) and its glass front between them (x 208-
+# 272, rows 46-64) 10 rows tall, the desk's top over the floor either side of the glass a slab on
+# the arms' height; the four machines (x 368-384, 432-448: 12 rows); the sofas at both ends are
+# walked on and stay as drawn. The terminal by the counter (x 304-320, rows 8-48) is the wall's: its
+# foot is drawn over a cell the player stands on, so standing it there would put it before them.
+
+CONTEST_FLOOR = ("f6b49c", "d5ac7b")
+CONTEST_WALL_SIDE = (48, 0, 64, 32)
+
+
+def contest_lobby():
+    facet, own_shell, piece = _helpers()
+    body = [(176, 26, 192, 64), (288, 26, 304, 64), (208, 46, 272, 64)]
+    machines = [piece("machine_%d_%d" % (x0, z0), [(x0, z0, x0 + 16, z0 + 16)], 12, leave=CONTEST_FLOOR)
+                for x0 in (368, 432) for z0 in (80, 144)]
+    return own_shell(machines + [
+        piece("counter", body, 10, claim=body),
+        piece("desk_w", [(192, 46, 208, 54)], 2, base=8, claim=[(192, 46, 208, 54)]),
+        piece("desk_e", [(272, 46, 288, 54)], 2, base=8, claim=[(272, 46, 288, 54)]),
+        piece("wall_w", [(0, 0, 141, 32), (141, 0, 161, 14)], 32, fill=16, foot=32, side=CONTEST_WALL_SIDE),
+        piece("wall_mid", [(161, 0, 333, 32), (333, 0, 353, 14)], 32, fill=16, foot=32,
+              side=CONTEST_WALL_SIDE),
+        piece("wall_e", [(353, 0, 496, 32)], 32, fill=16, side=CONTEST_WALL_SIDE),
+        piece("side_w", [], 32, side=CONTEST_WALL_SIDE, walls=[((0, 192), (0, 32))]),
+        piece("side_e", [], 32, side=CONTEST_WALL_SIDE, walls=[((496, 32), (496, 192))]),
+    ])
+
+
+# ── The Day Care (Route 117) ──────────────────────────────────────────────
+#
+# 12 x 9 cells, no model until the object audit of 2026-11-14: its counter, its displays, its
+# table and the fence round its garden lay drawn on the floor. The back wall (rows 0-32), its
+# doorway (cell 2,1) cut out under its lintel (rows 0-12, the opening x 32-48); the counter an L
+# round the Day Care lady (its arm x 64-78 from the wall's foot, its bar x 0-78 rows 44-64: 8 rows,
+# the arm's end over the wall's baseboard the wall's); two lattice displays on stands (x 80-112,
+# rows 30-48: 8 rows); the table (x 160-192, rows 80-112: 8 rows of legs, the planks its top); the
+# chairs walked on (6 rows); two plants (cards); the PC is the wall's (its foot over a cell the
+# player stands on). The garden's fence (x 104-192, rows 128-144) stands its pickets as a card - the
+# floor seen between them - and its gate post (x 96-104, rows 108-142) as tall as it is drawn.
+
+DAYCARE_FLOOR = ("7b9cff", "6283e6", "4a6ad5", "4162a4", "bde673", "a4c562")   # the boards, the garden
+DAYCARE_WALL_SIDE = (64, 0, 80, 32)
+
+
+def day_care():
+    facet, own_shell, piece = _helpers()
+    counter = [(64, 32, 78, 56), (0, 44, 78, 64)]
+    chairs = [piece("chair_%d_%d" % (x0, z0), [(x0, z0, x0 + 16, z0 + 16)], 6, leave=DAYCARE_FLOOR)
+              for (x0, z0) in ((32, 64), (176, 64), (144, 96))]
+    plants = [piece("plant_%d" % z0, [(0, z0, 16, z0 + 32)], 28, leave=DAYCARE_FLOOR, card=True)
+              for z0 in (80, 112)]
+    return own_shell(chairs + plants + [
+        piece("counter", counter, 8, claim=counter),
+        piece("display_w", [(80, 30, 96, 48)], 8, leave=DAYCARE_FLOOR),
+        piece("display_e", [(96, 30, 112, 48)], 8, leave=DAYCARE_FLOOR),
+        piece("table", [(160, 80, 192, 112)], 8, leave=DAYCARE_FLOOR),
+        piece("post", [(96, 108, 104, 142)], 34, leave=DAYCARE_FLOOR),
+        piece("fence", [(104, 128, 192, 144)], 16, leave=DAYCARE_FLOOR, card=True),
+        piece("wall", [(0, 0, 32, 32), (32, 0, 48, 12), (48, 0, 192, 32)], 32, fill=16, foot=32,
+              side=DAYCARE_WALL_SIDE),
+        piece("side_w", [], 32, side=DAYCARE_WALL_SIDE, walls=[((0, 144), (0, 32))]),
+        piece("side_e", [], 32, side=DAYCARE_WALL_SIDE, walls=[((192, 32), (192, 144))]),
+    ])
+
+
+# ── The Safari Zone's entrance (Route 121) ────────────────────────────────
+#
+# 18 x 14 cells, the store's Shop tiles, no model until the object audit of 2026-11-14. Its first
+# room is the Cycling Road gate's, 16 pixels east: the back wall (rows 0-32), the counter before it
+# (arms x 96-112 and 176-192 from the wall's foot, the bar between them rows 44-64: 10 rows), two
+# produce stands (x 112-176, rows 72-96), the terminal the wall's (its foot over a cell the player
+# stands on); three chairs (walked on: 6 rows). The corridor south of it (x 192-288): the
+# attendants' green counter (x 256-288, rows 104-192, an open bracket round them: 8 rows), four
+# plants (cards, one in the first room), a side wall down the black outside west of it (x 192).
+
+def safari_entrance():
+    facet, own_shell, piece = _helpers()
+    counter = [(96, 32, 112, 64), (176, 32, 192, 64), (112, 44, 176, 64)]
+    desk = [(256, 104, 272, 192), (272, 104, 288, 124), (272, 168, 288, 192)]
+    chairs = [piece("chair_%d_%d" % (x0, z0), [(x0, z0, x0 + 16, z0 + 16)], 6, leave=STORE_ORANGE)
+              for (x0, z0) in ((224, 48), (272, 48), (272, 64))]
+    plants = [piece("plant_%d_%d" % (x0, z0), [(x0, z0, x0 + 16, z0 + 32)], 28, leave=STORE_ORANGE,
+                    card=True) for (x0, z0) in ((0, 64), (192, 112), (192, 192), (272, 192))]
+    return own_shell(chairs + plants + [
+        piece("stand_w", [(112, 72, 144, 96)], 10, claim=[(112, 72, 144, 96)]),
+        piece("stand_e", [(144, 72, 176, 96)], 10, claim=[(144, 72, 176, 96)]),
+        piece("counter", counter, 10, claim=counter),
+        piece("desk", desk, 8, claim=desk),
+        piece("wall", [(0, 0, 288, 32)], 32, fill=16, side=STORE_WALL_SIDE),
+        piece("side_w", [], 32, side=STORE_WALL_SIDE, walls=[((0, 96), (0, 32))]),
+        piece("side_mid", [], 32, side=STORE_WALL_SIDE, walls=[((192, 224), (192, 96))]),
+        piece("side_e", [], 32, side=STORE_WALL_SIDE, walls=[((288, 32), (288, 224))]),
     ])
 
 
@@ -853,6 +1307,79 @@ def furnished_room_specs():
             "name": "store_rooftop",
             "interior": {"layout": "LAYOUT_LILYCOVE_CITY_DEPARTMENT_STORE_ROOFTOP",
                          "ground": [0x24A], "reuse_in": frozenset(), "pieces": rooftop()},
+        },
+        {
+            "name": "store_1f",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_DEPARTMENT_STORE_1F", "ground": [0x268],
+                         "under": "own", "reuse_in": frozenset(), "pieces": store_1f()},
+        },
+        {
+            "name": "store_2f",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_DEPARTMENT_STORE_2F", "ground": [0x201],
+                         "under": "own", "reuse_in": frozenset(), "pieces": store_2f()},
+        },
+        {
+            "name": "store_3f",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_DEPARTMENT_STORE_3F", "ground": [0x201],
+                         "under": "own", "reuse_in": frozenset(), "pieces": store_3f()},
+        },
+        {
+            "name": "store_4f",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_DEPARTMENT_STORE_4F", "ground": [0x201],
+                         "under": "own", "reuse_in": frozenset(), "pieces": store_4f()},
+        },
+        {
+            "name": "store_5f",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_DEPARTMENT_STORE_5F", "ground": [0x2F2, 0x2F4],
+                         "under": "own", "reuse_in": frozenset(), "pieces": store_5f()},
+        },
+        {
+            "name": "museum_1f",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_LILYCOVE_MUSEUM_1F", "ground": [0x202, 0x203],
+                         "under": "own", "reuse_in": frozenset(), "pieces": museum_1f()},
+        },
+        {
+            "name": "museum_2f",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_LILYCOVE_MUSEUM_2F", "ground": [0x268, 0x269],
+                         "under": "own", "reuse_in": frozenset(), "pieces": museum_2f()},
+        },
+        {
+            "name": "harbor",
+            # no shaded floor tiles named: their greys are the railings' (as the stations')
+            "interior": {"layout": "LAYOUT_HARBOR", "ground": [0x202],
+                         "under": "own", "reuse_in": frozenset(), "pieces": harbor()},
+        },
+        {
+            "name": "cycling_gate",
+            "interior": {"layout": "LAYOUT_ROUTE110_SEASIDE_CYCLING_ROAD_ENTRANCE", "ground": [0x268],
+                         "under": "own", "reuse_in": frozenset(), "pieces": cycling_gate()},
+        },
+        {
+            "name": "cable_car_station",
+            # no shaded floor tiles named: the platform's greys are the railings' too, and a shade
+            # tile's colours are the floor's wherever they run on from it (no rail claimed a pixel)
+            "interior": {"layout": "LAYOUT_CABLE_CAR_STATION", "ground": [0x2F0],
+                         "under": "own", "reuse_in": frozenset(), "pieces": cable_car_station()},
+        },
+        {
+            "name": "tent_lobby",
+            "interior": {"layout": "LAYOUT_BATTLE_TENT_LOBBY", "ground": [0x210, 0x211],
+                         "under": "own", "reuse_in": frozenset(), "pieces": tent_lobby()},
+        },
+        {
+            "name": "contest_lobby",
+            "interior": {"layout": "LAYOUT_LILYCOVE_CITY_CONTEST_LOBBY", "ground": [0x260],
+                         "under": "own", "reuse_in": frozenset(), "pieces": contest_lobby()},
+        },
+        {
+            "name": "day_care",
+            "interior": {"layout": "LAYOUT_ROUTE117_POKEMON_DAY_CARE", "ground": [0x201],
+                         "under": "own", "reuse_in": frozenset(), "pieces": day_care()},
+        },
+        {
+            "name": "safari_entrance",
+            "interior": {"layout": "LAYOUT_ROUTE121_SAFARI_ZONE_ENTRANCE", "ground": [0x268],
+                         "under": "own", "reuse_in": frozenset(), "pieces": safari_entrance()},
         },
         {
             "name": "safari_rest_house",
