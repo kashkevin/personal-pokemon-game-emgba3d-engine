@@ -592,7 +592,7 @@ WALL_COLOURS = ("f6b473", "de7b31", "ffe6b4")   # the Center's orange wall
 
 def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=False,
           back=None, card=False, top=None, foot=None, walls=(), cells=(), against=None,
-          claim=(), under=True, fill_down=(), each_foot=False):
+          claim=(), under=True, fill_down=(), each_foot=False, free=()):
     """`back`: the Z its top runs back to, where the cartridge's collision
     says it ends (or the wall it stands against); `against`: that wall's Z,
     where a top drawn deeper than the room in front of it stops, its back
@@ -605,12 +605,15 @@ def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=Fal
     `fill_down`: a wall's rectangles where what stands before it is filled from
     the wall's own pixels above in the same column (gen_voxel_buildings.hidden_source);
     `each_foot`: each column stands on its own drawn foot, as a wall's, not all on
-    the lowest - a front cut on the slant follows its drawing."""
+    the lowest - a front cut on the slant follows its drawing; `free`: cells (x, y)
+    of the room in its rectangle it does not answer for - a model is left out
+    while a cell it answers for is not the one it was made from, and a doorway
+    a script closes is the doorway's piece's, not the wall's over it."""
     return {"name": name, "shape": shape, "height": height, "base": base,
             "fill": fill, "leave": leave, "side": side, "solid": solid,
             "back": back, "card": card, "top": top, "foot": foot, "walls": walls,
             "cells": cells, "against": against, "claim": claim, "under": under,
-            "fill_down": fill_down, "each_foot": each_foot}
+            "fill_down": fill_down, "each_foot": each_foot, "free": free}
 
 
 def own_shell(pieces):
@@ -1179,8 +1182,15 @@ def stair_room(width, height, plain_x, doors, partition=None):
                                 (d + 1, 14, d + 15, 26), 0))
         x = d + 16
     wall.append((x, 0, w, 32))
+    # The wall answers for its whole rectangle but the doorways' cells under
+    # its lintels (`free`): the Trick House's last room closes its far door
+    # behind the player (a script's setmetatile on the doorway's cell), and the
+    # whole wall was left out on every visit, the room's own drawing laid back
+    # in its place - the posts leaning, the hole in its west end a jagged slab
+    # rising over it (the object audit of 2026-11-14, class 5). The doorway is
+    # the stairwell's (MS-233): with the door closed only its recess is out.
     return pieces + [
-        piece("wall", wall, 32, fill=16, foot=32, side=side),
+        piece("wall", wall, 32, fill=16, foot=32, side=side, free=[(door, 1) for door in doors]),
         piece("side_w", [], 32, side=side, walls=[((0, h), (0, 32))]),
         piece("side_e", [], 32, side=side, walls=[((w, 32), (w, h))]),
     ]

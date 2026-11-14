@@ -1038,7 +1038,9 @@ def interior_specs(spec):
                       "parts": (lambda ps: (lambda: ps))(parts),
                       "exact": [(0, 0, w * 16, h * 16)], "interior": spec["name"],
                       "reuse_in": room.get("reuse_in"), "under": room.get("under"),
-                      "card": bool(pc.get("card")), "wall": bool(pc.get("fill"))}
+                      "card": bool(pc.get("card")), "wall": bool(pc.get("fill")),
+                      # the cells of its rectangle it does not answer for (piece `free`)
+                      "free": {(cx - x0, cy - y0) for (cx, cy) in pc.get("free", ())}}
         if pc.get("card"):
             quads = card_quads(mine, cells, x0, y0, fpx,
                                lambda cx, cy: layout.cell_image(layout.metatile(cx, cy), layers=(0,)).load(),
@@ -1269,6 +1271,9 @@ def make_model(spec, layouts, models):
             parts = spec["parts"]()
         model = vb.Model(spec["name"], art, parts, (w, h), spec["ground"][0])
         model.owned = owned if owned is not None else {(i, j) for i in range(w) for j in range(h)}
+        if spec.get("free"):
+            # a doorway a script changes under a room's wall: the doorway's piece answers for it
+            model.owned = set(model.owned) - spec["free"]
         model.spec = spec
         model.layout = layout
         models.append(model)

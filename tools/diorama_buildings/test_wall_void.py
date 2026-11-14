@@ -154,5 +154,37 @@ class VoidPartTests(unittest.TestCase):
         self.assertEqual(vb.ortho_check(model, exact=[]), (0, 0, 0))
 
 
+class FreeCellTests(unittest.TestCase):
+    """A model is left out while a cell it answers for is not the one it was made from, and a room's
+    piece answers for every cell of its rectangle (MS-233). The stair rooms' back wall answered for the
+    doorway under each lintel: the Trick House's last room closes its far door behind the player (a
+    script's setmetatile on cell 10, 1), and the whole wall was left out on every visit, the room's own
+    drawing laid back in its place (the object audit of 2026-11-14, class 5). It is `free` of them: the
+    doorway is the stairwell's alone."""
+
+    def test_the_wall_answers_for_none_of_its_doorways(self):
+        import voxel_building_specs as specs
+        spec = next(s for s in specs.SPECS
+                    if s.get("interior", {}).get("layout") == "LAYOUT_ROUTE110_TRICK_HOUSE_END")
+        pieces = {ps["name"]: ps for ps in g.interior_specs(spec)}
+        wall = pieces["route110_trick_house_end_wall"]
+        x0, y0, w, h = wall["rect"]
+        doors = {(2 - x0, 1 - y0), (10 - x0, 1 - y0)}
+        self.assertEqual(wall["free"], doors)
+        models = []
+        g.make_model(wall, {}, models)
+        owned = models[0].owned
+        self.assertFalse(doors & owned)
+        # the lintels over them and the rest of its rectangle it answers for
+        self.assertIn((10 - x0, 0 - y0), owned)
+        self.assertEqual(len(owned), w * h - 2)
+        # and the stairwell answers for its doorway: closed, the door leaves out its recess alone
+        well = pieces["route110_trick_house_end_stairwell_10"]
+        wx, wy, ww, wh = well["rect"]
+        models = []
+        g.make_model(well, {}, models)
+        self.assertIn((10 - wx, 1 - wy), models[0].owned)
+
+
 if __name__ == "__main__":
     unittest.main()
