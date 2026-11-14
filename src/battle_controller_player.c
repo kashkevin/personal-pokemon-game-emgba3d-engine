@@ -194,6 +194,7 @@ void PlayerBufferExecCompleted(enum BattlerId battler)
 
 #ifdef PORTABLE
 static bool32 RunForfeitPrompt(enum BattlerId battler);
+static bool32 AskGiveUpTogether(enum BattlerId battler);
 #endif
 
 #line 183 // gba-line
@@ -364,6 +365,10 @@ static void HandleInputChooseAction(enum BattlerId battler)
                 PlaySE(SE_FAILURE); // nobody leaves a free-for-all halfway; a trainer is out when their last Pokemon faints
                 return;
             }
+#endif
+#ifdef PORTABLE
+            if (AskGiveUpTogether(battler)) // a battle together asks first (the owner's decision #61)
+                return;
 #endif
 #line 331 // gba-line
             BtlController_EmitTwoReturnValues(battler, B_COMM_TO_ENGINE, B_ACTION_RUN, 0);
@@ -1981,6 +1986,16 @@ static void PrintLinkStandbyMsg(void)
 // the battle?" (No first); Yes sends a forfeit notice. The question goes as soon as the battle goes on.
 static void HandleChooseActionAfterDma3(enum BattlerId battler);
 static const u8 sText_GiveUpBattle[] = _("Give up the battle?");
+// The owner's decision #61 (2026-11-14): in a battle together (two players on one side against the game's trainers: a
+// co-op Gym, the Tower Duo, the co-op Frontier and League ladders) a give-up stays the team's loss, and the question says
+// so. Both ways of giving up ask it: B while waiting on the other player (instead of "Give up the battle?") and the
+// action menu's GIVE UP, which in a battle together no longer goes at once. No first, as in the other question.
+static const u8 sText_GiveUpTogether[] = _("Giving up ends this battle\nfor both players. Give up?");
+
+static const u8 *GiveUpQuestion(void)
+{
+    return MultiplayerBattle_IsCoop() ? sText_GiveUpTogether : sText_GiveUpBattle;
+}
 // The question: not asked, its text printing (the Yes/No box waits for it, as the battle's own questions do: the box's
 // text colours would otherwise colour the rest of the question), or the box up.
 enum { FORFEIT_NOT_ASKED, FORFEIT_QUESTION_PRINTING, FORFEIT_QUESTION_UP };
@@ -2029,7 +2044,7 @@ static bool32 RunForfeitPrompt(enum BattlerId battler)
             PlaySE(SE_SELECT);
             gBattle_BG0_X = 0;
             gBattle_BG0_Y = 0;
-            BattlePutTextOnWindow(sText_GiveUpBattle, B_WIN_MSG);
+            BattlePutTextOnWindow(GiveUpQuestion(), B_WIN_MSG);
             sForfeitAsking = FORFEIT_QUESTION_PRINTING;
         }
         return FALSE;
@@ -2072,6 +2087,73 @@ static bool32 RunForfeitPrompt(enum BattlerId battler)
     return TRUE;
 }
 
+// The action menu's GIVE UP in a battle together: the question on the message page (as the B question has it), the
+// action menu again on No or B, the action Run on Yes - what GIVE UP sent at once before.
+static EWRAM_DATA u8 sGiveUpTogetherAsking = FORFEIT_NOT_ASKED;
+static EWRAM_DATA u8 sGiveUpTogetherCursor = 1;
+
+static void HandleInputGiveUpTogether(enum BattlerId battler)
+{
+    if (sGiveUpTogetherAsking == FORFEIT_QUESTION_PRINTING)
+    {
+        if (!IsTextPrinterActiveOnWindow(B_WIN_MSG))
+        {
+            HandleBattleWindow(YESNOBOX_X_Y, 0);
+            BattlePutTextOnWindow(gText_BattleYesNoChoice, B_WIN_YESNO);
+            sGiveUpTogetherCursor = 1;
+            BattleCreateYesNoCursorAt(1);
+            sGiveUpTogetherAsking = FORFEIT_QUESTION_UP;
+        }
+        return;
+    }
+    if (JOY_NEW(DPAD_UP) && sGiveUpTogetherCursor != 0)
+    {
+        PlaySE(SE_SELECT);
+        BattleDestroyYesNoCursorAt(sGiveUpTogetherCursor);
+        sGiveUpTogetherCursor = 0;
+        BattleCreateYesNoCursorAt(0);
+    }
+    else if (JOY_NEW(DPAD_DOWN) && sGiveUpTogetherCursor == 0)
+    {
+        PlaySE(SE_SELECT);
+        BattleDestroyYesNoCursorAt(sGiveUpTogetherCursor);
+        sGiveUpTogetherCursor = 1;
+        BattleCreateYesNoCursorAt(1);
+    }
+    else if (JOY_NEW(A_BUTTON | B_BUTTON))
+    {
+        bool32 yes = JOY_NEW(A_BUTTON) && sGiveUpTogetherCursor == 0;
+
+        PlaySE(SE_SELECT);
+        BattleDestroyYesNoCursorAt(sGiveUpTogetherCursor);
+        HandleBattleWindow(YESNOBOX_X_Y, WINDOW_CLEAR);
+        sGiveUpTogetherAsking = FORFEIT_NOT_ASKED;
+        if (yes)
+        {
+            PrintLinkStandbyMsg();
+            BtlController_EmitTwoReturnValues(battler, B_COMM_TO_ENGINE, B_ACTION_RUN, 0);
+            BtlController_Complete(battler);
+        }
+        else
+        {
+            PlayerHandleChooseAction(battler); // the action menu again, its cursor still on GIVE UP
+        }
+    }
+}
+
+// TRUE when the action menu's GIVE UP asks first (a battle together) and the question is now up.
+static bool32 AskGiveUpTogether(enum BattlerId battler)
+{
+    if (!MultiplayerBattle_IsCoop())
+        return FALSE;
+    gBattle_BG0_X = 0;
+    gBattle_BG0_Y = 0;
+    BattlePutTextOnWindow(sText_GiveUpTogether, B_WIN_MSG);
+    sGiveUpTogetherAsking = FORFEIT_QUESTION_PRINTING;
+    gBattlerControllerFuncs[battler] = HandleInputGiveUpTogether;
+    return TRUE;
+}
+
 // Once somebody gave up, the battle ends at its master's next safe point and no longer reads this player's choices:
 // every choice they are asked for is answered at once with an ordinary reply that changes nothing, and its menu closes
 // (the party menu answers for itself, party_menu.c). TRUE when this frame answered for the battler.
@@ -2082,6 +2164,17 @@ bool32 PlayerController_AnswerForForfeit(u32 battler)
     if (!MultiplayerBattle_ForfeitPending() || gBattlerBattleController[battler] != BATTLE_CONTROLLER_PLAYER)
         return FALSE;
     func = gBattlerControllerFuncs[battler];
+    if (func == HandleInputGiveUpTogether)
+    {
+        // the teammate gave up while this player was asked: the question goes, and the action menu's answer with it
+        if (sGiveUpTogetherAsking == FORFEIT_QUESTION_UP)
+        {
+            BattleDestroyYesNoCursorAt(sGiveUpTogetherCursor);
+            HandleBattleWindow(YESNOBOX_X_Y, WINDOW_CLEAR);
+        }
+        sGiveUpTogetherAsking = FORFEIT_NOT_ASKED;
+        func = HandleInputChooseAction;
+    }
     if (func == HandleInputChooseAction || func == HandleChooseActionAfterDma3)
     {
         TryHideLastUsedBall();
