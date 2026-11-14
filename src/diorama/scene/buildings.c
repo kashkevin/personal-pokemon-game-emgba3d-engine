@@ -512,7 +512,10 @@ bool DioramaBuildings_FrontAt(uint16_t layout, int x, int y, float x0, float x1,
  * Tents' battle room (Fallarbor's and Slateport's) has a low wall at the back wall's foot, a box over row 2: the
  * attendant Fallarbor's map puts there, at (3, 2), stood inside it. The Aqua Hideout B2F's desk is a box over row 6:
  * the grunt at (13, 5) behind it showed only the cap. The 2D game draws the audience in the stands and the other two
- * over the drawing in front of them. Every other cell keeps the rules of ModelPush (gl_object_renderer.c).
+ * over the drawing in front of them. Professor Birch's lab table (the lab with the table, where a new player chooses
+ * the starter and the Johto starters wait later) is a box 8 rows high over row 4: its three Poke Balls, at (8, 4) to
+ * (10, 4), stood on the floor inside it, only their red tops over the top (the 3D object audit of 2026-11-14); they
+ * stand on it. Every other cell keeps the rules of ModelPush (gl_object_renderer.c).
  */
 enum
 {
@@ -530,6 +533,7 @@ static const struct
     {LAYOUT_BATTLE_FRONTIER_BATTLE_DOME_BATTLE_ROOM, 0, 1, 19, 2, PERSON_ON_TOP},
     {LAYOUT_BATTLE_TENT_BATTLE_ROOM,                 1, 2,  9, 2, PERSON_OVER_FRONT},
     {LAYOUT_AQUA_HIDEOUT_B2F,                       11, 5, 13, 5, PERSON_OVER_FRONT},
+    {LAYOUT_LITTLEROOT_TOWN_PROFESSOR_BIRCHS_LAB_WITH_TABLE, 8, 4, 10, 4, PERSON_ON_TOP},
 };
 
 static uint8_t PersonOnModel(uint16_t layout, int x, int y)

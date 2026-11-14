@@ -1215,6 +1215,84 @@ def shipyard_2f():
     ])
 
 
+# ── The Contest Halls (the contests' stage rooms) ─────────────────────────
+#
+# Six layouts, 15 x 11 cells each and the same room but for the stairs' and the emblem's colours (the
+# Normal, Beauty, Tough, Cool, Smart and Cute halls), no model until the object audit of 2026-11-14:
+# its walls lay drawn round the room as a frame. The back wall (rows 0-31: a band of bows over its rim
+# and inner face) stands its drawn rows; the side walls the drawing shows as a frame from above stand
+# at the room's edges (x 16 and 224, from the back wall to the front wall's rows), dressed with the back
+# wall; the front wall is never stood. The stage's brick border stands 8 rows round it (its north side
+# a face, its sides strips from above whose south ends meet the south side's face), the stairs down
+# from it are the floor's; the box on the stage 7 rows. The stage keeps its own floor (its lower layer).
+
+CONTEST_HALL_FLOOR = ("94acb4", "738383", "bddec5")   # the room's floor, the stage's
+CONTEST_HALL_SIDE = (30, 0, 46, 31)                   # a stretch of the back wall, top to foot
+
+
+def contest_hall():
+    facet, own_shell, piece = _helpers()
+    fl = CONTEST_HALL_FLOOR
+    return own_shell([
+        piece("box", [(144, 74, 160, 87)], 7, leave=fl),
+        piece("border_w", [(48, 48, 56, 144)], 8, leave=fl),
+        piece("border_e", [(184, 48, 192, 144)], 8, leave=fl),
+        piece("border_n", [(56, 48, 184, 56)], 8, leave=fl),
+        piece("border_sw", [(56, 136, 96, 144)], 8, leave=fl),
+        piece("border_se", [(144, 136, 184, 144)], 8, leave=fl),
+        piece("wall", [(0, 0, 240, 31)], 31, fill=16, foot=31, side=CONTEST_HALL_SIDE),
+        piece("side_w", [], 31, side=CONTEST_HALL_SIDE, walls=[((16, 160), (16, 31))]),
+        piece("side_e", [], 31, side=CONTEST_HALL_SIDE, walls=[((224, 31), (224, 160))]),
+    ])
+
+
+# ── The S.S. Tidal's corridor ─────────────────────────────────────────────
+#
+# 18 x 13 cells, no model until the object audit of 2026-11-14: its back wall with the portholes and the
+# block of cabins in the middle of the corridor lay drawn on the floor. The back wall its drawn rows (the
+# black row over it is nothing); the cabin block (x 48-240) 27 rows, its four doors painted on its face
+# (walked into, as the store's lift), its white roof its top running back to the corridor behind it; the
+# side walls at the room's west edge and the map's east edge. The stairs at the corners and the shadows
+# are the floor's.
+
+TIDAL_FLOOR = ("948bbd", "9cacd5", "6a6a73")     # the corridor's carpet, the shadows
+TIDAL_WALL_SIDE = (45, 1, 61, 32)                # the back wall between two portholes, top to foot
+
+
+def ss_tidal_corridor():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("block", [(48, 57, 240, 158)], 27, leave=TIDAL_FLOOR),
+        piece("wall", [(16, 1, 288, 32)], 31, fill=16, foot=32, side=TIDAL_WALL_SIDE),
+        piece("side_w", [], 31, side=TIDAL_WALL_SIDE, walls=[((16, 192), (16, 32))]),
+        piece("side_e", [], 31, side=TIDAL_WALL_SIDE, walls=[((288, 32), (288, 192))]),
+    ])
+
+
+# ── The Trick House's corridor (Route 110) ─────────────────────────────────
+#
+# 15 x 24 cells, no model until the object audit of 2026-11-14: the L-shaped corridor's three wooden
+# walls lay drawn on the floor. Each its drawn face, 33 rows from its foot - the panel between two posts,
+# the black over the panel nothing; the posts' feet a few rows further stay on the floor, as the school's
+# pillars'. The corridor's other edges are the house's black: no side walls.
+
+TRICK_WALL_SIDE = (64, 1, 80, 33)      # a stretch of panel, top to foot
+
+
+def trick_house_corridor():
+    facet, own_shell, piece = _helpers()
+
+    def section(name, x0, x1, y0):
+        """A wall section: posts x0-x0+8 and x1-8-x1, the panel between, its top a row under the posts'."""
+        return piece(name, [(x0, y0, x0 + 8, y0 + 33), (x0 + 8, y0 + 1, x1 - 8, y0 + 33), (x1 - 8, y0, x1, y0 + 33)],
+                     33, fill=16, foot=y0 + 33, side=TRICK_WALL_SIDE)
+    return own_shell([
+        section("wall_n", 48, 240, 0),
+        section("wall_w", 0, 48, 96),
+        section("wall_s", 48, 96, 320),
+    ])
+
+
 # ── Lilycove's Contest Lobby ───────────────────────────────────────────────
 #
 # 31 x 12 cells, no model until the object audit of 2026-11-14. The back wall (rows 0-32: a red
@@ -1941,6 +2019,46 @@ def furnished_room_specs():
             "interior": {"layout": "LAYOUT_SLATEPORT_CITY_POKEMON_FAN_CLUB", "ground": [0x201, 0x202, 0x231],
                          "shade": [0x204, 0x205, 0x228, 0x234], "under": "own", "reuse_in": frozenset(),
                          "pieces": slateport_fan_club()},
+        },
+        {
+            "name": "contest_hall",
+            "interior": {"layout": "LAYOUT_CONTEST_HALL", "ground": [0x225, 0x271], "under": "own",
+                         "reuse_in": frozenset(), "pieces": contest_hall()},
+        },
+        {
+            "name": "contest_hall_beauty",
+            "interior": {"layout": "LAYOUT_CONTEST_HALL_BEAUTY", "ground": [0x225, 0x271], "under": "own",
+                         "reuse_in": frozenset(), "pieces": contest_hall()},
+        },
+        {
+            "name": "contest_hall_tough",
+            "interior": {"layout": "LAYOUT_CONTEST_HALL_TOUGH", "ground": [0x225, 0x271], "under": "own",
+                         "reuse_in": frozenset(), "pieces": contest_hall()},
+        },
+        {
+            "name": "contest_hall_cool",
+            "interior": {"layout": "LAYOUT_CONTEST_HALL_COOL", "ground": [0x225, 0x271], "under": "own",
+                         "reuse_in": frozenset(), "pieces": contest_hall()},
+        },
+        {
+            "name": "contest_hall_smart",
+            "interior": {"layout": "LAYOUT_CONTEST_HALL_SMART", "ground": [0x225, 0x271], "under": "own",
+                         "reuse_in": frozenset(), "pieces": contest_hall()},
+        },
+        {
+            "name": "contest_hall_cute",
+            "interior": {"layout": "LAYOUT_CONTEST_HALL_CUTE", "ground": [0x225, 0x271], "under": "own",
+                         "reuse_in": frozenset(), "pieces": contest_hall()},
+        },
+        {
+            "name": "ss_tidal_corridor",
+            "interior": {"layout": "LAYOUT_SS_TIDAL_CORRIDOR", "ground": [0x2BA], "under": "own",
+                         "reuse_in": frozenset(), "pieces": ss_tidal_corridor()},
+        },
+        {
+            "name": "trick_house_corridor",
+            "interior": {"layout": "LAYOUT_ROUTE110_TRICK_HOUSE_CORRIDOR", "ground": [0x229], "under": "own",
+                         "reuse_in": frozenset(), "pieces": trick_house_corridor()},
         },
         {
             "name": "trainer_fan_club",
