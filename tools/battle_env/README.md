@@ -93,7 +93,11 @@ faces of the walls in its column, the outside ends it, and a stretch with no flo
 (furniture against the edge) stands none (KNOWN_ISSUES MS-232: before, it ran from the shallowest
 back wall's foot through all of them - in the black either side of the Mauville Gym's alcove,
 its cells drawn with the floor's yellow, and from inside the Battle Tower's back walls, its far
-end showing over them). The Facility tileset's stairwell - the flight up, three cells on a back
+end showing over them). Floor of another drawing in its column (the floor shaded at the back
+wall's foot, a curtain's hem over it) once stopped it short of the back wall, the outside black
+in the gap (the object audit's survey of 2026-11-15: the Battle Pike's rooms, and seventeen more):
+rows of floor from the wall's foot in its column to its stretch, none a way out (`EXIT`), it runs
+on through, on its cells' own drawing (`own_floor`). The Facility tileset's stairwell - the flight up, three cells on a back
 wall's two rows: Mt. Pyre 1F-5F, Team Aqua's hideout B1F and B2F, the Space Center 1F - is
 modelled by hand (`battle_room_auto.STAIRWELL`; KNOWN_ISSUES MS-237): read as walls, its lintel
 stood a row behind its posts and half as tall, and the 3D cameras saw the outside black over it,

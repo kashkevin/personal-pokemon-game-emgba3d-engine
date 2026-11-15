@@ -94,8 +94,11 @@ class SideWallTests(unittest.TestCase):
     def test_the_mauville_gym(self):
         ground, pieces, notes = bra.analyse("LAYOUT_MAUVILLE_CITY_GYM")
         walls = {pc["name"]: pc["walls"][0][:2] for pc in pieces if pc["name"].startswith("side_")}
-        # the floor reaches the edges only below the alcove's wings (rows 9 on)
-        self.assertEqual(walls, {"side_w": ((0, 240), (0, 176)), "side_e": ((160, 144), (160, 160))})
+        # the floor reaches the edges only below the alcove's wings; from the foot of the wall in each edge
+        # column (rows 9 and 8), over floor shaded at that foot, on its cells' own drawing (SideWallFromTheFootTests)
+        self.assertEqual(walls, {"side_w": ((0, 240), (0, 144)), "side_e": ((160, 128), (160, 160))})
+        own = {pc["name"]: pc["own_floor"] for pc in pieces if pc["name"].startswith("side_")}
+        self.assertEqual(own, {"side_w": True, "side_e": True})
 
 
 class FloorShadeTests(unittest.TestCase):
@@ -517,6 +520,45 @@ class BerthTests(unittest.TestCase):
         for lid in self.ROOMS:
             if lid != "LAYOUT_SS_TIDAL_ROOMS":
                 self.assertFalse([pc["name"] for pc in self.read[lid][1] if pc.get("leave")], lid)
+
+
+
+class SideWallFromTheFootTests(unittest.TestCase):
+    """The object audit's survey of 2026-11-15: a side wall started past any floor of another drawing in its
+    column, so where the floor at a back wall's foot is shaded (or a curtain's hem drawn over it: the Battle
+    Pike's rooms) it stood a row or more in front of the back wall, and the outside showed black in the gap
+    from every camera - in eighteen rooms. Rows from the foot of the wall in its column that are all floor, none
+    a way out (EXIT), it runs on through, on its cells' own drawing (`own_floor`), which loses none of it."""
+
+    def side(self, lid, name):
+        ground, pieces, notes = bra.analyse(lid)
+        return {pc["name"]: pc for pc in pieces}[name]
+
+    def test_the_pike_rooms_wall_runs_on_from_the_curtains(self):
+        pc = self.side("LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_NORMAL", "side_e")
+        # from the curtained back wall's foot in its column (row 4; it started at row 5) to the room's front
+        self.assertEqual(pc["walls"], [((144, 64), (144, 128))])
+        self.assertTrue(pc["own_floor"])
+
+    def test_one_that_starts_at_the_foot_is_as_it_was(self):
+        for name, seg in (("side_w", ((0, 80), (0, 48))), ("side_e", ((80, 48), (80, 80)))):
+            pc = self.side("LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_FINAL", name)
+            self.assertEqual(pc["walls"], [seg], name)
+            self.assertFalse(pc["own_floor"], name)
+
+    def test_not_over_a_way_out(self):
+        # the Abandoned Ship's hidden floor's corridors: a way out among the rows before its east wall's stretch
+        pc = self.side("LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_CORRIDORS", "side_e")
+        self.assertEqual(pc["walls"], [((208, 48), (208, 176))])
+        self.assertFalse(pc["own_floor"])
+
+    def test_its_cells_keep_their_own_drawing(self):
+        import gen_voxel_buildings as gen
+        spec = bra.auto_room_spec("auto_battle_frontier_battle_pike_room_normal",
+                                  "LAYOUT_BATTLE_FRONTIER_BATTLE_PIKE_ROOM_NORMAL")
+        specs = {ps["name"]: ps for ps in gen.interior_specs(spec)}
+        self.assertEqual(specs["auto_battle_frontier_battle_pike_room_normal_side_e"]["under"], "own")
+        self.assertIsNone(specs["auto_battle_frontier_battle_pike_room_normal_wall_7_0"]["under"])
 
 
 class TrickHouseWallTests(unittest.TestCase):

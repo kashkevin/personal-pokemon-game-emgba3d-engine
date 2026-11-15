@@ -1050,7 +1050,9 @@ def interior_specs(spec):
                       "rect": (x0, y0, w, h), "ground": room["ground"], "art": art,
                       "parts": (lambda ps: (lambda: ps))(parts),
                       "exact": [(0, 0, w * 16, h * 16)], "interior": spec["name"],
-                      "reuse_in": room.get("reuse_in"), "under": room.get("under"),
+                      "reuse_in": room.get("reuse_in"),
+                      # its cells' own drawing under it: the room's, or the piece's alone (`own_floor`)
+                      "under": "own" if pc.get("own_floor") else room.get("under"),
                       "card": bool(pc.get("card")), "wall": bool(pc.get("fill")),
                       # the cells of its rectangle it does not answer for (piece `free`)
                       "free": {(cx - x0, cy - y0) for (cx, cy) in pc.get("free", ())}}

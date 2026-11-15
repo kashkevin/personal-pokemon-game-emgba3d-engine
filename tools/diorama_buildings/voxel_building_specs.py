@@ -592,7 +592,7 @@ WALL_COLOURS = ("f6b473", "de7b31", "ffe6b4")   # the Center's orange wall
 
 def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=False,
           back=None, card=False, top=None, foot=None, walls=(), cells=(), against=None,
-          claim=(), under=True, fill_down=(), each_foot=False, free=()):
+          claim=(), under=True, fill_down=(), each_foot=False, free=(), own_floor=False):
     """`back`: the Z its top runs back to, where the cartridge's collision
     says it ends (or the wall it stands against); `against`: that wall's Z,
     where a top drawn deeper than the room in front of it stops, its back
@@ -608,12 +608,14 @@ def piece(name, shape, height, base=0, fill=None, leave=(), side=None, solid=Fal
     the lowest - a front cut on the slant follows its drawing; `free`: cells (x, y)
     of the room in its rectangle it does not answer for - a model is left out
     while a cell it answers for is not the one it was made from, and a doorway
-    a script closes is the doorway's piece's, not the wall's over it."""
+    a script closes is the doorway's piece's, not the wall's over it; `own_floor`: its cells keep their
+    own drawing under it (the room's `under` "own" for this piece alone), where the room's floor laid
+    there would lose a floor of another drawing (a side wall over the floor shaded at a wall's foot)."""
     return {"name": name, "shape": shape, "height": height, "base": base,
             "fill": fill, "leave": leave, "side": side, "solid": solid,
             "back": back, "card": card, "top": top, "foot": foot, "walls": walls,
             "cells": cells, "against": against, "claim": claim, "under": under,
-            "fill_down": fill_down, "each_foot": each_foot, "free": free}
+            "fill_down": fill_down, "each_foot": each_foot, "free": free, "own_floor": own_floor}
 
 
 def own_shell(pieces):

@@ -119,6 +119,9 @@ WALL_ROWS = {
 # instead showed 15 grey pixels at 45 degrees.
 UNDER_OWN = {"LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1"}
 
+# A cell that is a way out of the room, by its behaviour: no side wall runs on over it.
+EXIT = re.compile(r"WARP|DOOR|STAIRS|LADDER|ESCALATOR")
+
 # Things drawn on a floor of another colour that leave it to the floor round them, by the secondary
 # tileset: {metatiles: the floor's colours}. The InsideShip tileset's bin on the carpet in shade (beside
 # a berth, against a cabin's side): a thing claims its cells' pixels that are not the room's floor, and
@@ -677,13 +680,27 @@ def analyse(layout_id, taken=(), drop=()):
             if not stretches:
                 continue
             first, end = max(stretches, key=lambda s: (s[1] - s[0], -s[0]))
+            # The rows from the foot of the wall in its column down to that stretch, when they are all
+            # floor and none a way out (EXIT: a door, a warp, stairs) - the floor shaded at a back
+            # wall's foot, a curtain's hem drawn over it - the wall runs on through them on its cells'
+            # own drawing (`own_floor`), which loses none of it. Before, it started a row or more in
+            # front of the back wall, and the outside showed black in the gap from every camera (the
+            # object audit's survey of 2026-11-15: "the Battle Pike room's curtain gap").
+            col_foot = max([y + 1 for y in range(H) if (edge_x, y) in wall_cells], default=back_foot)
+            own = first > col_foot and all(floor[y][edge_x] and not void[y][edge_x]
+                                           and (edge_x, y) not in wall_cells
+                                           and not EXIT.search(behaviour(meta(edge_x, y)))
+                                           for y in range(col_foot, first))
+            if own:
+                notes.append("%s runs on from the wall's foot, row %d, on its cells' own floor" % (name, col_foot))
+                first = col_foot
             if (first, end) != (back_foot, max(rows) + 1):
                 notes.append("%s runs rows %d-%d (other floor, the outside or a wall's face in its column)"
                              % (name, first, end - 1))
             front = end * 16
             xpx = 0 if edge_x == 0 else W * 16
             seg = ((xpx, front), (xpx, first * 16)) if edge_x == 0 else ((xpx, first * 16), (xpx, front))
-            pieces.append(piece(name, [], wall_h, side=sample, walls=[seg]))
+            pieces.append(piece(name, [], wall_h, side=sample, walls=[seg], own_floor=own))
     for name in drop:
         if any(pc["name"] == name for pc in pieces):
             notes.append("left out: %s" % name)
