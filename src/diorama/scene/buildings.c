@@ -155,6 +155,66 @@ static void Release(void)
     sReady = false;
 }
 
+/* Whether every model's and every ground patch's vertices begin on a triangle's first and hold whole triangles. */
+static bool WholeTriangles(void)
+{
+    unsigned i;
+
+    if (sVertexCount % 3 != 0)
+        return false;
+    for (i = 0; i < sModelCount; i++)
+        if (sModels[i].firstVertex % 3 != 0 || sModels[i].vertexCount % 3 != 0)
+            return false;
+    for (i = 0; i < sPlacementCount; i++)
+        if (sPlacements[i].extraFirst % 3 != 0 || sPlacements[i].extraCount % 3 != 0)
+            return false;
+    return true;
+}
+
+/* Every flat face of the models a hair wider (the object audit of 2026-11-14, class 6). A model's flat faces - its
+ * floor, its tops, its ground patches - meet in edges that end in another face's corner (a T-junction); rounded
+ * apart, the two left pixels between them through which the ground under the model showed - the room's floor laid
+ * there for it to stand on - a dotted line of another colour (the Ranking Hall's streaks into the black, the S.S.
+ * Tidal's black between its cabins, the tatami houses' entrances). A flat triangle's corners move 1/256 of a tile
+ * outwards, their page pixels kept: the faces overlap by a hair instead (the drawing the same either side of a seam),
+ * a face's texels moved a 16th of a pixel at the most. The upright faces too were tried: no seam more was closed. The
+ * faces looking south a walker stands before (CollectFronts) are upright: unmoved. */
+static void WidenFlatFaces(void)
+{
+    const float widen = 1.0f / 256.0f;
+    uint32_t k;
+
+    for (k = 0; k + 2 < sVertexCount; k += 3)
+    {
+        struct DioramaBuildingVertex *t = &sVertices[k];
+        float x0, x1, z0, z1;
+        unsigned j;
+
+        if (t[0].y != t[1].y || t[0].y != t[2].y)
+            continue;
+        x0 = x1 = t[0].x;
+        z0 = z1 = t[0].z;
+        for (j = 1; j < 3; j++)
+        {
+            if (t[j].x < x0) x0 = t[j].x;
+            if (t[j].x > x1) x1 = t[j].x;
+            if (t[j].z < z0) z0 = t[j].z;
+            if (t[j].z > z1) z1 = t[j].z;
+        }
+        for (j = 0; j < 3; j++)
+        {
+            if (t[j].x == x0)
+                t[j].x -= widen;
+            else if (t[j].x == x1)
+                t[j].x += widen;
+            if (t[j].z == z0)
+                t[j].z -= widen;
+            else if (t[j].z == z1)
+                t[j].z += widen;
+        }
+    }
+}
+
 bool DioramaBuildings_Init(void)
 {
     const uint8_t *table = gDioramaBuildingsTable;
@@ -249,6 +309,10 @@ bool DioramaBuildings_Init(void)
     /* Six little-endian floats a vertex, the layout of DioramaBuildingVertex
      * on every target this builds for. */
     memcpy(sVertices, table + at, 24u * sVertexCount);
+    if (WholeTriangles())
+        WidenFlatFaces();
+    else
+        SDL_Log("Diorama: building vertices not in whole triangles; flat faces left as made");
     for (i = 0; i < sPageCount; i++)
     {
         unsigned end = i + 1 < sPageCount ? gDioramaBuildingsPageOffsets[i + 1] : UINT32_MAX;
