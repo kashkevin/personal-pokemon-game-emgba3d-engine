@@ -447,8 +447,9 @@ class BerthTests(unittest.TestCase):
     tall in front of it."""
 
     ROOMS = {
-        "LAYOUT_SS_TIDAL_ROOMS": {(1, 2), (6, 2), (10, 2), (15, 2), (19, 2), (33, 2), (1, 11), (6, 11), (24, 11),
-                                  (28, 11)},
+        # (15, 11): the berth with a blue blanket
+        "LAYOUT_SS_TIDAL_ROOMS": {(1, 2), (6, 2), (10, 2), (15, 2), (19, 2), (33, 2), (1, 11), (6, 11), (15, 11),
+                                  (24, 11), (28, 11)},
         "LAYOUT_ABANDONED_SHIP_ROOMS_1F": {(10, 2), (1, 11), (15, 11)},
         "LAYOUT_ABANDONED_SHIP_ROOMS_B1F": {(1, 2), (6, 2), (10, 2), (19, 2), (24, 2)},
         "LAYOUT_ABANDONED_SHIP_ROOMS2_1F": {(1, 2)},

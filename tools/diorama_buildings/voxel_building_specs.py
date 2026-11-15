@@ -1010,7 +1010,10 @@ def house2():
               top=(36, 14, 46, 15), side=(32, 20, 34, 39)),
         # the kitchen: a cupboard, the sink and hob, the fridge
         piece("tap", [(133, 16, 142, 25)], 8, base=8, leave=GENERIC_WALL[:2]),
-        piece("cupboard", [(112, 17, 128, 40)], 16, leave=GENERIC_WALL + fl, back=32),
+        # its sides the frame's column (brown, the drawers' divider across it): a tile of the drawers'
+        # fronts ran across them, handles and all (the object audit's class 3, the Fan Clubs' dressers)
+        piece("cupboard", [(112, 17, 128, 40)], 16, leave=GENERIC_WALL + fl, back=32,
+              side=(113, 24, 114, 40)),
         piece("sink", [(128, 21, 160, 40)], 8, leave=GENERIC_WALL + fl, against=32),
         piece("fridge", [(160, 10, 176, 40)], 24, leave=GENERIC_WALL + fl, back=32),
         piece("wall", [(0, 0, 176, 32)], 32, fill=16, foot=32, side=(48, 0, 64, 32)),
@@ -1032,7 +1035,9 @@ def house_with_bed():
         piece("bed_head", [(4, 48, 28, 56)], 7, base=7, leave=fl),
         piece("bed", [(4, 56, 28, 80)], 7, leave=fl, solid=True),
         # along the back wall: the green chest, the bookcase
-        piece("chest", [(16, 15, 32, 40)], 17, leave=GENERIC_WALL + fl, back=32),
+        # its sides the frame's column, plain dark green (as the second house's cupboard's)
+        piece("chest", [(16, 15, 32, 40)], 17, leave=GENERIC_WALL + fl, back=32,
+              side=(17, 23, 18, 40)),
         piece("bookcase", [(128, 10, 160, 40)], 22, leave=GENERIC_WALL + fl, back=32),
         piece("wall", [(0, 0, 160, 32)], 32, fill=16, foot=32, side=(64, 0, 80, 32)),
         piece("side_w", [], 32, side=(64, 0, 80, 32), walls=[((0, 128), (0, 32))]),
@@ -1101,7 +1106,27 @@ def wandas_furniture():
     ]
 
 
-PLAIN_ROOM_PIECES = {"LAYOUT_VERDANTURF_TOWN_WANDAS_HOUSE": wandas_furniture}
+# The low tea table on the tatami (the generic building's tiles): its top drawn 21 rows, its apron
+# and legs 6 - with a cup on it (houses 3 and Lilycove's 2, Mr. Briney's, the Tunnelers' rest house,
+# the Trick House's entrance and end, the Fossil Maniac's, the Cove Lily Motel) and without (house 4,
+# the motel). The first room that has each stands it, and the rooms built after it stand it as it is
+# (gen_voxel_buildings.reuse_pieces). Before, it stood only in the rooms after Mr. Briney's, as his:
+# cut three columns short of the drawing's right edge (they lay on the floor beside it, a strip) and
+# 10 rows tall, its front the top's colour over the apron - a box; elsewhere, and without the cup,
+# it lay flat (the object audit's class 2, the Cove Lily Motel's tables). Its outline and legs are
+# its own; the tatami showing between the legs is the floor's.
+TEA_TABLE_FLOOR = ("c5ffac", "a4cd6a", "83ac4a", "7b7b83", "6a8b31")
+
+
+def tea_table(cx, cy):
+    """The tea table on cells (cx, cy) to (cx + 1, cy + 1)."""
+    x, y = cx * 16, cy * 16
+    return piece("tea_table", [(x + 2, y + 3, x + 30, y + 31)], 6, leave=TEA_TABLE_FLOOR, solid=True)
+
+
+PLAIN_ROOM_PIECES = {"LAYOUT_VERDANTURF_TOWN_WANDAS_HOUSE": wandas_furniture,
+                     "LAYOUT_HOUSE3": lambda: [tea_table(4, 3)],
+                     "LAYOUT_HOUSE4": lambda: [tea_table(7, 4)]}
 
 
 def plain_room(width, height, plain_x, sides):
@@ -1126,8 +1151,8 @@ BRINEY_WALL = ("d5b483", "ffffff", "d5c54a", "947329", "ac8b39", "629c8b")
 def briney_room():
     fl = BRINEY_FLOOR
     side = (48, 0, 64, 32)
+    # its tea table is house 3's, tile for tile, and stands here as it is
     return [
-        piece("table", [(114, 67, 139, 94)], 10, leave=fl, solid=True),
         piece("jar_s", [(1, 65, 14, 80)], 9, leave=fl, solid=True),
         piece("jar_w", [(1, 49, 14, 64)], 9, leave=fl, solid=True),
         piece("jar_e", [(17, 49, 30, 64)], 9, leave=fl, solid=True),

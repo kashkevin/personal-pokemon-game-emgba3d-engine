@@ -130,7 +130,11 @@ UNDER_OWN = {"LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1"}
 # drawing from that foot (its headboard's top, the name plate, the pillow, the mattress) to the
 # frame and legs on the cells' last rows, its front.
 BERTH = {
-    "gTileset_InsideShip": ((0x250, 0x251, 0x258, 0x259), (0x254, 0x255, 0x25C, 0x25D)),
+    # the bed against the alcove's left and right, and the S.S. Tidal's one with a blue blanket (its
+    # rooms' cell 15, 11): not known, it stood painted upright on the wall's face as the others had
+    # (the object audit's survey of 2026-11-15)
+    "gTileset_InsideShip": ((0x250, 0x251, 0x258, 0x259), (0x254, 0x255, 0x25C, 0x25D),
+                            (0x271, 0x272, 0x279, 0x27A)),
 }
 BERTH_TALL = 8          # rows of the bed's front: its frame, the legs under it
 
