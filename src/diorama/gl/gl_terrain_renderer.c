@@ -2330,6 +2330,25 @@ static bool BuildInputUntimed(const struct DioramaSceneSnapshot *snapshot,
                     resolvedCells[gridIndex].materials[face].flags);
                 SetTerrainMaterial(&cell->underlayMaterials[face], source->metatileId,
                                    riserWhole ? DIORAMA_MATERIAL_FULL : DIORAMA_MATERIAL_BASE);
+                /* The Acro Bike's rails (the Safari Zone's south, Route 119's ponds): a bridge a level up whose
+                 * block drew the whole cell on its top and down its sides - the rail's white beam and posts are its
+                 * upper layer, the grass or the water round them its lower - so a box of grass or water stood a
+                 * level over the ground under the beam (the object audit of 2026-11-14, class 5). Its top draws its
+                 * upper layer alone, the beam (the empty texels discarded, in the sun's shadow pass too), its sides
+                 * nothing, its underside left out (terrain_mesh.c): the ground shows from under it, the underlay,
+                 * its lower layer. The rider's height on the rail is the deck's, as before. */
+                if (cell->shape == DIORAMA_SHAPE_BRIDGE && cell->materials[face].layer != DIORAMA_MATERIAL_NONE
+                 && (source->behavior == MB_HORIZONTAL_RAIL || source->behavior == MB_VERTICAL_RAIL
+                     || source->behavior == MB_ISOLATED_HORIZONTAL_RAIL
+                     || source->behavior == MB_ISOLATED_VERTICAL_RAIL))
+                {
+                    if (face == DIORAMA_MATERIAL_FACE_TOP)
+                        SetTerrainMaterialTransformed(&cell->materials[face], source->metatileId,
+                                                      DIORAMA_MATERIAL_FOREGROUND,
+                                                      cell->materials[face].rotation, cell->materials[face].flags);
+                    else
+                        cell->materials[face].layer = DIORAMA_MATERIAL_NONE;
+                }
             }
             {
                 /* A detail object stands here (props.h, gl_props.c): the

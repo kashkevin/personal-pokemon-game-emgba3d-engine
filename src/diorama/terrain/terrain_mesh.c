@@ -3268,6 +3268,15 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
                 band.vMin = band.vMax;
                 continue;
             }
+            /* An Acro Bike rail's deck draws its upper layer alone, see-through (gl_terrain_renderer.c): its
+             * underside, laid with its top's layer as every underside is, showed through the empty texels in
+             * another orientation (white stubs standing up from the rails) and is left out. */
+            if (face->axis == 1 && face->sign < 0 && surface == 0 && cell->shape == DIORAMA_SHAPE_BRIDGE
+             && sourceMaterial->layer == DIORAMA_MATERIAL_FOREGROUND)
+            {
+                band.vMin = band.vMax;
+                continue;
+            }
             if (GroundSideShowsRock(input, cell, surface, materialFace, face))
                 sourceMaterial = &input->rockFace;
             FacePositions(&band, positions);

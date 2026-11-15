@@ -707,6 +707,16 @@ static void TestBridgeHasTwoSurfaces(void)
     center->surfaces[1].topHeight = -0.5f;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(CountSideQuads(&mesh, -0.5f, -1.0f / 16.0f) == 4);
+
+    /* An Acro Bike rail's deck draws its upper layer alone (gl_terrain_renderer.c, the object audit of
+     * 2026-11-14): its underside, which showed through the empty texels, is left out; the water's under it stays. */
+    center->surfaces[1].bottomHeight = -0.1875f;
+    center->surfaces[1].topHeight = -0.125f;
+    center->materials[DIORAMA_MATERIAL_FACE_TOP].layer = DIORAMA_MATERIAL_FOREGROUND;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.topFaceCount == 65);
+    assert(mesh.bottomFaceCount == 64);
+    assert(mesh.sideFaceCount == 16);
 }
 
 static void TestStairsAndDescendingStairwell(void)
