@@ -443,6 +443,36 @@ def _inside(shape, x, y):
     return False
 
 
+FLOOR_ISLAND = 256    # pixels: a patch of the floor's colour smaller than a cell, cut off from the open floor
+
+
+def drop_floor_islands(ground, W, H, least=FLOOR_ISLAND, keep=None):
+    """`ground` with each of its connected patches (4-neighbour) smaller than `least`
+    pixels taken out: the floor's colour in a little island the open floor never
+    reaches is the drawing's own (the tatami's grey border rows matched by an entrance's
+    grey block). A patch with a pixel where `keep` (a grid like `ground`) is set stays.
+    Changes `ground` in place and returns it."""
+    seen = [[False] * W for _ in range(H)]
+    for y in range(H):
+        for x in range(W):
+            if not ground[y][x] or seen[y][x]:
+                continue
+            patch = [(x, y)]
+            seen[y][x] = True
+            i = 0
+            while i < len(patch):
+                px, py = patch[i]
+                i += 1
+                for nx, ny in ((px + 1, py), (px - 1, py), (px, py + 1), (px, py - 1)):
+                    if 0 <= nx < W and 0 <= ny < H and ground[ny][nx] and not seen[ny][nx]:
+                        seen[ny][nx] = True
+                        patch.append((nx, ny))
+            if len(patch) < least and not (keep and any(keep[py][px] for (px, py) in patch)):
+                for (px, py) in patch:
+                    ground[py][px] = False
+    return ground
+
+
 def _inside_grid(shape, W, H):
     """[[_inside(shape, x, y) for x in range(W)] for y in range(H)], asked only
     within the shape's bounds (a pixel beyond them by more than one is out)."""
@@ -730,6 +760,13 @@ def interior_specs(spec):
             for y in range(max(0, ny0), min(H, ny1)):
                 for x in range(max(0, nx0), min(W, nx1)):
                     ground[y][x] = False
+    # The floor's colour in a little island outside every piece, which the open floor never
+    # reaches, is the drawing's own, not floor: left to the terrain, the room's plain floor laid
+    # there showed through the floor decal over it as a dotted line a row off - the tatami's grey
+    # border rows matched by Lilycove's house 2's grey entrance block (the object audit of
+    # 2026-11-14, class 6). An island with a pixel inside a piece's shape - floor seen between a
+    # chair's legs - is the floor's, as before.
+    drop_floor_islands(ground, W, H, keep=shaped)
     # the floor's shaded variants: their colours are floor wherever they run
     # on from the open floor, never a piece's
     shade = set()
@@ -1051,8 +1088,17 @@ def interior_specs(spec):
                       "parts": (lambda ps: (lambda: ps))(parts),
                       "exact": [(0, 0, w * 16, h * 16)], "interior": spec["name"],
                       "reuse_in": room.get("reuse_in"),
-                      # its cells' own drawing under it: the room's, or the piece's alone (`own_floor`)
-                      "under": "own" if pc.get("own_floor") else room.get("under"),
+                      # its cells' own drawing under it: the room's, or the piece's alone (`own_floor`);
+                      # a side wall's too - edge on to the GBA's camera, drawn nowhere, its cells'
+                      # drawing is the floor beside it, and the room's one floor laid there showed at
+                      # its floor decal's edge as a line of another colour (the tatami houses' entrances,
+                      # the object audit of 2026-11-14, class 6) - unless a room's black front corner,
+                      # laid as floor (`open`), is one of its cells: its own drawing there is the black
+                      "under": "own" if pc.get("own_floor") or (
+                                   pc["name"].startswith("side") and pc.get("walls") and not pc.get("shape")
+                                   and not any(opened[y][x] for y in range(y0 * 16, min(H, (y0 + h) * 16))
+                                               for x in range(x0 * 16, min(W, (x0 + w) * 16))))
+                               else room.get("under"),
                       "card": bool(pc.get("card")), "wall": bool(pc.get("fill")),
                       # the cells of its rectangle it does not answer for (piece `free`)
                       "free": {(cx - x0, cy - y0) for (cx, cy) in pc.get("free", ())}}
