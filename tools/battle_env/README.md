@@ -120,7 +120,15 @@ partitions that meet the wall were read as one run with it and stood 48 rows tal
 cells into the room; the wall stands its two rows and the partitions are things, as the maze's
 others are. A room whose second floor metatile shares a piece's corner pixels stands its pieces on
 their cells' own drawing (`UNDER_OWN`: Trick House puzzle 1, whose tatami shaded along a
-partition's foot has the partitions' outline for its top row).
+partition's foot has the partitions' outline for its top row; the Abandoned Ship's second B1F,
+whose carpet shaded along its walls has the berths' edge pixels). The InsideShip tileset's tables
+and bins stand their drawn fronts (`battle_room_auto.THING_FRONT`: 8 rows, a table's apron and
+legs, a bin's body) on their own cells, the carpet round them left to the floor, a table and a bin
+beside it two things, each standing where it is drawn - read as things, a table stood 20 rows tall
+with its top run down its front, a table stacked on a table from the 3D cameras (the object audit's
+survey of 2026-11-15). The holes in the Abandoned Ship's floor lie as drawn (`HOLES`), not dark
+blocks, and the walls between two cabins with a passage before them stand as two thin walls their
+drawn faces' height (`DIVIDER`), not one wall 48 rows tall with the outside's black for its face.
 
 What the proof cannot see: it compares the picture the GBA's camera sees. A piece that gives
 back its drawing exactly can still be wrong from the battle camera's angle - the survey's

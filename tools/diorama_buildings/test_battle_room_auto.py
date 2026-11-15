@@ -456,6 +456,7 @@ class BerthTests(unittest.TestCase):
         "LAYOUT_ABANDONED_SHIP_ROOMS_1F": {(10, 2), (1, 11), (15, 11)},
         "LAYOUT_ABANDONED_SHIP_ROOMS_B1F": {(1, 2), (6, 2), (10, 2), (19, 2), (24, 2)},
         "LAYOUT_ABANDONED_SHIP_ROOMS2_1F": {(1, 2)},
+        "LAYOUT_ABANDONED_SHIP_ROOMS2_B1F": {(1, 2), (10, 2), (15, 2)},
     }
 
     @classmethod
@@ -503,23 +504,17 @@ class BerthTests(unittest.TestCase):
         # the S.S. Tidal's last berth (28, 11) has a bin on the cell at its foot (28, 13), in the same run
         ground, pieces, notes = self.read["LAYOUT_SS_TIDAL_ROOMS"]
         names = {pc["name"]: pc for pc in pieces}
-        bin_ = names["edge_28_13"]
+        bin_ = names["thing_28_13"]
         self.assertEqual(bin_["shape"], [(448, 208, 464, 224)])
         self.assertEqual(bin_["height"], 8)
 
     def test_a_bin_on_the_shaded_carpet_leaves_it_to_the_floor(self):
-        # THING_FLOOR: the S.S. Tidal's three bins on the carpet in shade stand as bins, not red boxes;
-        # nothing else leaves the carpet (the tables' drawings have its colours in them)
-        tiles, colours = bra.THING_FLOOR["gTileset_InsideShip"]
+        # THING_FRONT: the S.S. Tidal's three bins on the carpet in shade stand as bins, not red boxes - the
+        # carpet and its shade round them are the floor's
         ground, pieces, notes = self.read["LAYOUT_SS_TIDAL_ROOMS"]
-        leaving = {pc["name"] for pc in pieces if pc.get("leave")}
-        self.assertEqual(leaving, {"edge_10_5", "edge_16_13", "edge_28_13"})
-        for pc in pieces:
-            if pc["name"] in leaving:
-                self.assertEqual(tuple(pc["leave"]), colours, pc["name"])
-        for lid in self.ROOMS:
-            if lid != "LAYOUT_SS_TIDAL_ROOMS":
-                self.assertFalse([pc["name"] for pc in self.read[lid][1] if pc.get("leave")], lid)
+        names = {pc["name"]: pc for pc in pieces}
+        for name in ("thing_10_5", "thing_16_13", "thing_28_13"):
+            self.assertEqual(tuple(names[name]["leave"]), bra.SHIP_CARPET, name)
 
 
 
@@ -607,3 +602,92 @@ class TrickHouseWallTests(unittest.TestCase):
         self.assertEqual(spec["interior"]["under"], "own")
         spec = bra.auto_room_spec("auto_route110_trick_house_puzzle2", "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE2")
         self.assertIsNone(spec["interior"]["under"])
+
+
+class ShipCabinTests(unittest.TestCase):
+    """The object audit's survey of 2026-11-15, the ship cabins (the InsideShip tileset). A table stood 20 rows
+    tall with its top's lower half run down its front - a table stacked on a table; a bin with the shaded carpet
+    north of it for a top stood 20 rows, beside the outside 24; a bin under one half of a table cut the table in
+    two, the half over the bin flat; the tables and the bins on a cabin's last row lay flat. The dark holes in
+    the Abandoned Ship's floor stood as dark blocks topped with carpet. The walls between two cabins with a
+    passage in front of them stood as one wall 48 rows tall, the outside's black its face."""
+
+    ROOMS = ["LAYOUT_SS_TIDAL_ROOMS", "LAYOUT_ABANDONED_SHIP_ROOMS_1F", "LAYOUT_ABANDONED_SHIP_ROOMS_B1F",
+             "LAYOUT_ABANDONED_SHIP_ROOMS2_1F", "LAYOUT_ABANDONED_SHIP_ROOMS2_B1F"]
+
+    @classmethod
+    def setUpClass(cls):
+        cls.read = {lid: bra.analyse(lid) for lid in cls.ROOMS}
+        cls.art = {lid: vb.LayoutArt(lid) for lid in cls.ROOMS}
+
+    def cells(self, pc):
+        return sorted((x0 // 16, y0 // 16) for (x0, y0, x1, y1) in pc["shape"])
+
+    def test_each_table_and_bin_stands_its_drawn_front_on_its_own_cells(self):
+        fronts = bra.THING_FRONT["gTileset_InsideShip"]
+        for lid in self.ROOMS:
+            L = self.art[lid]
+            for pc in self.read[lid][1]:
+                kinds = {next((i for i, (tiles, _, _) in enumerate(fronts) if L.metatile(x, y) in tiles), None)
+                         for (x, y) in self.cells(pc)}
+                if not pc["name"].startswith("thing_") or kinds == {None}:
+                    continue
+                with self.subTest(room=lid, piece=pc["name"]):
+                    # one kind, and every cell a whole cell of it
+                    self.assertEqual(len(kinds), 1)
+                    tiles, rows, colours = fronts[kinds.pop()]
+                    self.assertEqual(pc["height"], rows)
+                    self.assertEqual(tuple(pc["leave"]), colours)
+                    for (x0, y0, x1, y1) in pc["shape"]:
+                        self.assertEqual((x1 - x0, y1 - y0), (16, 16))
+
+    def test_the_tidal_cabins_tables_and_bins(self):
+        # every table whole - the one with a bin under its east half (22-23, 5-6) included - and every bin its
+        # own cell, those on a cabin's last row (row 7) standing too
+        ground, pieces, notes = self.read["LAYOUT_SS_TIDAL_ROOMS"]
+        names = {pc["name"]: self.cells(pc) for pc in pieces if pc["name"].startswith("thing_")}
+        for (x, y, w) in ((5, 6, 2), (13, 5, 2), (22, 5, 2), (33, 6, 2), (11, 12, 2), (31, 12, 4)):
+            self.assertEqual(names["thing_%d_%d" % (x, y)],
+                             sorted((x + i, y + j) for i in range(w) for j in range(2)))
+        for (x, y) in ((7, 7), (10, 5), (16, 13), (23, 7), (28, 13)):
+            self.assertEqual(names["thing_%d_%d" % (x, y)], [(x, y)])
+
+    def test_the_holes_in_the_floor_lie_as_drawn(self):
+        for lid in self.ROOMS:
+            L = self.art[lid]
+            holes = {(x, y) for y in range(L.h) for x in range(L.w)
+                     if L.metatile(x, y) in bra.HOLES["gTileset_InsideShip"]}
+            for pc in self.read[lid][1]:
+                for (x0, y0, x1, y1) in pc["shape"]:
+                    for (x, y) in holes:
+                        self.assertFalse(x0 < x * 16 + 16 and x * 16 < x1 and y0 < y * 16 + 16 and y * 16 < y1,
+                                         (lid, pc["name"], (x, y)))
+
+    def test_the_walls_between_two_cabins_stand_apart(self):
+        # the Abandoned Ship 1F's lower cabins (rows 9-12 over the passage on row 13) and the second B1F's (rows
+        # 0-3 over row 4): two thin walls, their faces 28 rows, the black between them no wall's
+        for lid, ya, yb in (("LAYOUT_ABANDONED_SHIP_ROOMS_1F", 9, 13), ("LAYOUT_ABANDONED_SHIP_ROOMS2_B1F", 0, 4)):
+            ground, pieces, notes = self.read[lid]
+            names = {pc["name"]: pc for pc in pieces}
+            with self.subTest(room=lid):
+                self.assertNotIn("wall_8_%d" % ya, names)
+                west, east = names["divider_8_%d" % ya], names["divider_9_%d" % ya]
+                self.assertEqual(west["shape"], [(128, ya * 16, 134, yb * 16)])
+                self.assertEqual(east["shape"], [(154, ya * 16, 160, yb * 16)])
+                for pc in (west, east):
+                    self.assertEqual(pc["height"], 28)
+                    self.assertTrue(pc["own_floor"])
+                # nothing else stands over the columns
+                for pc in pieces:
+                    if pc is west or pc is east:
+                        continue
+                    for (x0, y0, x1, y1) in pc["shape"]:
+                        self.assertFalse(x0 < 160 and 128 < x1 and y0 < yb * 16 and ya * 16 < y1, pc["name"])
+                # the room's tallest piece is its wall
+                self.assertLessEqual(max(pc["height"] for pc in pieces), 32)
+
+    def test_the_second_b1f_stands_on_its_cells_own_floor(self):
+        # its carpet shaded along the walls' and the passage's rows is a floor of its own (UNDER_OWN), whose
+        # pixels on the berths' edges are the berths': the plain carpet laid under them showed there
+        spec = bra.auto_room_spec("auto_abandoned_ship_rooms2_b1f", "LAYOUT_ABANDONED_SHIP_ROOMS2_B1F")
+        self.assertEqual(spec["interior"]["under"], "own")

@@ -248,6 +248,9 @@ AUTO_ROOMS = [
     "LAYOUT_ABANDONED_SHIP_CORRIDORS_B1F",
     "LAYOUT_ABANDONED_SHIP_ROOMS_B1F",
     "LAYOUT_ABANDONED_SHIP_ROOMS2_1F",
+    # the second B1F's two cabins: proved once the walls between cabins stood as two (DIVIDER), its
+    # table its drawn front (THING_FRONT) and the holes in its floor lay as drawn (HOLES)
+    "LAYOUT_ABANDONED_SHIP_ROOMS2_B1F",
     "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_CORRIDORS",
     "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_2F",
     # proved with its sand ridges' cross pieces left out (AUTO_DROP): the back wall and the

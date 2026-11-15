@@ -116,23 +116,14 @@ WALL_ROWS = {
 # metatiles, the tatami and the tatami shaded along a partition's foot, whose top row is the
 # partitions' outline: the outline's corner pixels in a partition's cell are that floor's own, so
 # floor, and under the partition (WALL_ROWS made those cells a partition's) the tatami laid there
-# instead showed 15 grey pixels at 45 degrees.
-UNDER_OWN = {"LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1"}
+# instead showed 15 grey pixels at 45 degrees. The Abandoned Ship's second B1F the same way: its
+# floor is the carpet and the carpet shaded along the walls' and the passage's rows, whose pixels on
+# the berths' edges are the berths' own, so floor, and the plain carpet laid under the berths showed
+# there (24 pixels).
+UNDER_OWN = {"LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1", "LAYOUT_ABANDONED_SHIP_ROOMS2_B1F"}
 
 # A cell that is a way out of the room, by its behaviour: no side wall runs on over it.
 EXIT = re.compile(r"WARP|DOOR|STAIRS|LADDER|ESCALATOR")
-
-# Things drawn on a floor of another colour that leave it to the floor round them, by the secondary
-# tileset: {metatiles: the floor's colours}. The InsideShip tileset's bin on the carpet in shade (beside
-# a berth, against a cabin's side): a thing claims its cells' pixels that are not the room's floor, and
-# the shaded carpet is another colour, so the bin stood as a block of carpet the cell wide with the bin
-# painted on its top and front - two bins on a red box - where the bin on the plain carpet stood as
-# itself (the object audit's survey of 2026-11-15). Only the bins' cells: the tables' drawings have the
-# carpet's colours in them too, and left to the floor they striped the tables' tops red.
-THING_FLOOR = {
-    # the carpet and its dots, and in shade
-    "gTileset_InsideShip": ({0x235, 0x268, 0x277}, ("de7b52", "dea462", "bd5a41", "bd7341")),
-}
 
 # Ship berths modelled by hand, by their metatiles (the secondary tileset's): the InsideShip tileset's
 # bed in its alcove, two cells by two under the back wall, its side board on the west or (the
@@ -152,6 +143,50 @@ BERTH = {
                             (0x271, 0x272, 0x279, 0x27A)),
 }
 BERTH_TALL = 8          # rows of the bed's front: its frame, the legs under it
+
+# Things of a known front, by the secondary tileset: [(their metatiles, the rows of their front, the
+# floor's colours they leave round them)]. The InsideShip tileset's tables - the octagonal one two
+# cells by two (its top row in two drawings), the S.S. Tidal's long one with its middle cells
+# between - drawn from above: the green top, then the apron and the legs on the bottom cells' last 8
+# rows. As a thing a table stood 20 rows tall on its foot with its top's lower half run down its
+# front: from the game's cameras a table stacked on a table (the object audit's survey of
+# 2026-11-15, the Abandoned Ship's cabins and the S.S. Tidal's). Its bin, on the carpet or in its
+# shade: the opening drawn from above, the body under it on the cell's last 8 rows; with the shaded
+# carpet north of it for a top it stood 20 rows, beside the outside 24, and a thing claims its
+# cells' pixels that are not the room's floor, so on the carpet in shade a bin stood as a block of
+# carpet with the bin painted on its top and front (two bins on a red box). Each stands its drawn
+# front on its own cells (not the carpet north of it), the carpet and its shade round it - a bin's
+# corners, a table's, the floor between its legs - left to the floor; a table and a bin beside it are
+# two things (a bin under one half of a table had cut it in two, the half over the bin flat), and
+# each stands where it is drawn, the floor in front of it or not (the S.S. Tidal's tables and bins on
+# its cabins' last row lay flat).
+SHIP_CARPET = ("de7b52", "dea462", "bd5a41", "bd7341")
+THING_FRONT = {
+    "gTileset_InsideShip": [
+        ({0x256, 0x257, 0x25E, 0x25F, 0x270, 0x278, 0x20F, 0x217}, 8, SHIP_CARPET),
+        ({0x262, 0x235, 0x268, 0x277}, 8, SHIP_CARPET),
+    ],
+}
+
+# Blocked cells drawn as gaps in the floor, by the secondary tileset: the InsideShip tileset's two
+# dark holes at a cabin's walls (the Abandoned Ship's). Read as things they stood as dark blocks
+# with the carpet drawn north of them for a top, beside the outside as tall as the room's walls (the
+# survey of 2026-11-15); they lie as drawn.
+HOLES = {
+    "gTileset_InsideShip": {0x2AA, 0x2AB},
+}
+
+# The walls between two cabins with a passage in front of them, by the secondary tileset: (the left
+# column's last two cells, the right column's, the rows of their faces, each wall's pixel columns in
+# its cell). The InsideShip tileset's (the Abandoned Ship's cabins side by side): two thin walls,
+# white along their tops, their ends grey facing the passage, the outside black between them. The
+# two columns read as one wall run from the room's top to the passage and stood 48 rows, the
+# outside's black its face - a black column half as tall again as the back wall between the cabins
+# (the survey of 2026-11-15). Each wall stands on its own, its drawn face's height, its cells' own
+# drawing under it; the black between lies as drawn.
+DIVIDER = {
+    "gTileset_InsideShip": ((0x247, 0x24F), (0x246, 0x24E), 28, (0, 6), (10, 16)),
+}
 
 
 def berths(layout, walls):
@@ -334,7 +369,9 @@ def analyse(layout_id, taken=(), drop=()):
     stand = STAND.get(layout_id, set())
     apart = APART.get(layout_id, set())
     max_wall = min(MAX_WALL, LEVEL_WALL.get(layout_id, MAX_WALL))
+    holes = HOLES.get(L.secondary, set())
     solid = [[blocked(x, y) and not void[y][x] and not level[y][x] and (x, y) not in taken
+              and meta(x, y) not in holes
               and (not changes(meta(x, y)) or (x, y) in stand) for x in range(W)] for y in range(H)]
 
     counts = collections.Counter(meta(x, y) for y in range(H) for x in range(W)
@@ -448,6 +485,22 @@ def analyse(layout_id, taken=(), drop=()):
             wall_cells.difference_update((c, yy) for c in cols for yy in range(ya + wall_rows, yb))
             notes.append("the wall's %d rows: columns %s, rows %d-%d a thing's"
                          % (wall_rows, ",".join(map(str, sorted(cols))), ya + wall_rows, yb - 1))
+    # the walls between two cabins (DIVIDER): their columns' run is no wall's, their cells stay the
+    # walls' (no thing of them); each stands as a partition (divider_pieces)
+    dividers = []
+    divider = DIVIDER.get(L.secondary)
+    if divider:
+        left, right = divider[0], divider[1]
+        for (ya, yb), cols in sorted(walls.items()):
+            for c in sorted(cols):
+                if yb - ya >= 2 and c + 1 in cols \
+                        and (meta(c, yb - 2), meta(c, yb - 1)) == left \
+                        and (meta(c + 1, yb - 2), meta(c + 1, yb - 1)) == right:
+                    dividers.append((c, ya, yb))
+        for (c, ya, yb) in dividers:
+            walls[(ya, yb)].remove(c)
+            walls[(ya, yb)].remove(c + 1)
+            notes.append("the cabins' walls by hand: columns %d-%d, rows %d-%d" % (c, c + 1, ya, yb - 1))
     # berths modelled by hand (BERTH): the wall over each stands to the row its foot is drawn on
     hand_berths = berths(L, walls)
     for (bx, by, runs) in hand_berths:
@@ -469,7 +522,13 @@ def analyse(layout_id, taken=(), drop=()):
         notes.append("stairwell by hand: columns %d-%d, rows %d-%d" % (sx, sx + 2, sy, sy + 1))
 
     pieces = []
-    # things and edges: connected blocked cells that are not a wall's face
+    # things and edges: connected blocked cells that are not a wall's face; a thing of a known front
+    # (THING_FRONT) joins only cells of its own kind
+    fronts = THING_FRONT.get(L.secondary, [])
+
+    def kind(x, y):
+        return next((i for i, (tiles, _, _) in enumerate(fronts) if meta(x, y) in tiles), None)
+
     seen = set()
     things = []
     alone = ALONE.get(layout_id, set())
@@ -486,7 +545,8 @@ def analyse(layout_id, taken=(), drop=()):
                     continue
                 for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
                     if 0 <= nx < W and 0 <= ny < H and solid[ny][nx] and (nx, ny) not in wall_cells \
-                            and (nx, ny) not in seen and (nx, ny) not in alone:
+                            and (nx, ny) not in seen and (nx, ny) not in alone \
+                            and kind(nx, ny) == kind(cx, cy):
                         seen.add((nx, ny))
                         todo.append((nx, ny))
             things.append(comp)
@@ -552,16 +612,14 @@ def analyse(layout_id, taken=(), drop=()):
                 out.append(cur)
         return [[(x, y) for x in cols for y in range(ya, yb)] for (ya, yb), cols in out]
 
-    def floor_left(comp):
-        """The floor's colours a thing leaves round it (THING_FLOOR): only where all its cells are
-        the listed metatiles."""
-        tiles, colours = THING_FLOOR.get(L.secondary, ((), ()))
-        return colours if all(meta(cx, cy) in tiles for (cx, cy) in comp) else ()
-
     def thing_pieces():
         out = []
         for k, comp in enumerate(part for whole in things for part in one_foot(whole)):
-            if not runs_to_floor(comp):
+            # a thing of a known front (THING_FRONT): its own cells, its drawn front's rows, standing
+            # where it is drawn
+            kinds = {kind(cx, cy) for (cx, cy) in comp}
+            known = None if len(kinds) != 1 or None in kinds else fronts[kinds.pop()]
+            if not known and not runs_to_floor(comp):
                 notes.append("left flat: %d cells at %s (no front on the floor)" % (len(comp), comp[0]))
                 continue
             cells = set(comp)
@@ -572,7 +630,7 @@ def analyse(layout_id, taken=(), drop=()):
             # its drawing over the floor cell north of it (not the floor shaded there: it stood the
             # piece 20 rows tall with the floor laid on its top, MS-227)
             for (cx, cy) in comp:
-                if (cx, cy - 1) not in cells and cy - 1 >= 0 and floor[cy - 1][cx] \
+                if not known and (cx, cy - 1) not in cells and cy - 1 >= 0 and floor[cy - 1][cx] \
                         and differs_from_floor(cx, cy - 1) and not floor_shade(cx, cy - 1) \
                         and (cx, cy - 1) not in apart:
                     rects.append((cx * 16, cy * 16 - 16, cx * 16 + 16, cy * 16))
@@ -583,7 +641,10 @@ def analyse(layout_id, taken=(), drop=()):
             foot = max(cy for _, cy in comp) * 16 + 16
             x0 = min(cx for cx, _ in comp) * 16
             drawn = foot - min(r[1] for r in rects)
-            if beside_out:
+            if known:
+                tall = known[1]
+                name = "thing_%d_%d" % (comp[0][0], comp[0][1])
+            elif beside_out:
                 # as tall as the room's walls, with a drawn top left to lay back
                 tall = min(wall_h, max(8, drawn - 8))
                 name = "edge_%d_%d" % (comp[0][0], comp[0][1])
@@ -592,7 +653,22 @@ def analyse(layout_id, taken=(), drop=()):
                 name = "thing_%d_%d" % (comp[0][0], comp[0][1])
             out.append(piece(name, rects, tall, back=top if drawn - tall < foot - top else None,
                              solid=True, side=(x0, foot - min(tall, 16), x0 + 16, foot),
-                             leave=floor_left(comp)))
+                             leave=known[2] if known else ()))
+        return out
+
+    def divider_pieces():
+        """The walls between two cabins (DIVIDER): each its pixel columns from the run's top to the
+        passage, its drawn face's rows tall, dressed with that face; its cells' own drawing under
+        it, the outside's black between the two among it."""
+        out = []
+        if not dividers:
+            return out
+        _, _, tall, left_px, right_px = divider
+        for (c, ya, yb) in dividers:
+            for col, (a, b) in ((c, left_px), (c + 1, right_px)):
+                X, foot = col * 16, yb * 16
+                out.append(piece("divider_%d_%d" % (col, ya), [(X + a, ya * 16, X + b, foot)], tall,
+                                 solid=True, side=(X + a, foot - tall, X + b, foot), own_floor=True))
         return out
 
     def stairwell_pieces(walls_built):
@@ -647,6 +723,7 @@ def analyse(layout_id, taken=(), drop=()):
     built = wall_pieces()
     pieces += built
     pieces += stairwell_pieces(built)
+    pieces += divider_pieces()
     # the room's sides where its floor reaches the map's edge
     back_foot = min((yb for (ya, yb) in walls), default=None)
     if back_foot is not None:
