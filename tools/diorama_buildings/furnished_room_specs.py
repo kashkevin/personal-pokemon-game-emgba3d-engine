@@ -978,6 +978,25 @@ def ever_grande_hall(rows):
               side=HALL_WALL_SIDE, free=[(5, 2)]),
     ])
 
+
+# ── The Battle Arena's lobby (the Battle Frontier) ─────────────────────────
+#
+# 16 x 13 cells. A dojo: its back wall (rows 0-48: the beams, the shoji screens, the alcove with the
+# hanging scroll in the middle) behind a raised wooden stage (rows 48-128, walked round, not on), the
+# stone floor before it with the lobby's furniture. The terrain raises the stage and the wall's cells
+# a level, and a model stands on the ground under its door (gl_building_renderer.c PlacementGround):
+# the wall stands on the stage. It lay drawn on the stage before (the object audit of 2026-11-14,
+# class 1, pictured 2026-11-15).
+
+ARENA_LOBBY_WALL_SIDE = (64, 0, 80, 48)     # a shoji screen in its frame, beam to foot
+
+
+def arena_lobby():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("wall", [(0, 0, 256, 48)], 48, fill=16, foot=48, side=ARENA_LOBBY_WALL_SIDE),
+    ])
+
 # ── The Pokemon League 1F (Ever Grande City) ───────────────────────────────
 #
 # 19 x 12 cells, the Pokemon Center's tiles in a wider room, with no model of its own until the object
@@ -2080,6 +2099,11 @@ def furnished_room_specs():
             "name": "league_1f",
             "interior": {"layout": "LAYOUT_EVER_GRANDE_CITY_POKEMON_LEAGUE_1F", "ground": [0x240],
                          "under": "own", "reuse_in": frozenset(), "pieces": league_1f()},
+        },
+        {
+            "name": "arena_lobby",
+            "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_ARENA_LOBBY", "ground": [0x201],
+                         "under": "own", "reuse_in": frozenset(), "pieces": arena_lobby()},
         },
         {
             "name": "ever_grande_short_hall",

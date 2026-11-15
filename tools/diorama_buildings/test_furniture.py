@@ -142,5 +142,21 @@ class EverGrandeHallTests(unittest.TestCase):
             self.assertFalse([n for n in pieces if n.startswith("rail_") and int(n.split("_")[2]) >= rows])
 
 
+
+class ArenaLobbyTests(unittest.TestCase):
+    """The Battle Arena's lobby had no model: its shoji back wall lay on the dojo's raised stage (the object
+    audit, class 1). The wall stands its drawn rows on its foot, and the game stands it on the stage."""
+
+    def test_the_back_wall_is_its_drawn_rows_across_the_room(self):
+        L = vb.LayoutArt("LAYOUT_BATTLE_FRONTIER_BATTLE_ARENA_LOBBY")
+        wall = own_pieces("LAYOUT_BATTLE_FRONTIER_BATTLE_ARENA_LOBBY")["wall"]
+        self.assertEqual(wall["shape"], [(0, 0, L.w * 16, 48)])
+        self.assertEqual((wall["height"], wall["foot"]), (48, 48))
+        # its foot row the wall's, the row under it the stage's (the shoji's frame, then the boards)
+        px = drawing(L, 0, 46, 32, 49)
+        self.assertIn("ac5231", {px[(x, 47)] for x in range(32)})
+        self.assertEqual({px[(x, 48)] for x in range(32)}, {"eee6a4"})
+
+
 if __name__ == "__main__":
     unittest.main()
