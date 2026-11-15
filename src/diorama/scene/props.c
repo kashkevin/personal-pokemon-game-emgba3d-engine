@@ -455,6 +455,30 @@ static const struct DioramaProp sTrainerHill[] = {
     HILL_BLOCK(0x2EB), HILL_BLOCK(0x2EC), HILL_BLOCK(0x2F4),
 };
 
+/* The Battle Frontier's yellow flags (the object audit of 2026-11-14, class 4: they lay on the plazas, the walls
+ * and the sea), each a pole on a low wall's cell and its cloth on the cells north of it, their upper layer over
+ * the ground, the wall's stones or the sea. The pole's cell is a low wall's too: the pole is its first entry (the
+ * ground under it the lower layer, the stones), the wall the next (DIORAMA_PROP_AND_NEXT), drawn from the plain
+ * wall's cell of the same lower layer (its own art would be the pole's slot). The pole stands on the wall's top,
+ * on the row of its foot's drawing: 5 pixels south of the cell's middle on a wall facing north over the plaza
+ * (0x3FD; 0x3F5 on a wall running north-south), 3 north of it on one facing south (0x3D6, 0x3D7, 0x3CD, the
+ * northern walls against the sea). The cloth's cells stand on their own ground a row south and a tile up, on the
+ * pole's line (as the arches do: a cloth may hang over the plaza, a cell with nothing to stand on); a cloth two rows
+ * over the pole, over the sea, stands on the wall's cell under it (`standOn`). */
+#define FLAG_POLE(id, z, wall) \
+    { PROP(id, FENCE, SLAB, 1, LOWER), .depth = 2, .offsetZ = (z), .lift16 = 7, .flags = DIORAMA_PROP_AND_NEXT }, \
+    { PROP(id, FENCE, BLOCK, 0, KEEP), .height16 = 7, .onlyPalette = 3 + 1, .flags = DIORAMA_PROP_BLOCKED, \
+      .artMetatile = (wall) }
+#define FLAG_CLOTH(id) { PROP(id, FENCE, SLAB, 1, LOWER), .depth = 2, .offsetZ = 16 + 5, .lift16 = 16 + 7 }
+/* the cloth on a north-south wall's cell (0x3F6): the wall there too */
+#define FLAG_CLOTH_ON_WALL(id, wall) \
+    { PROP(id, FENCE, SLAB, 1, LOWER), .depth = 2, .offsetZ = 16 + 5, .lift16 = 16 + 7, \
+      .flags = DIORAMA_PROP_AND_NEXT }, \
+    { PROP(id, FENCE, BLOCK, 0, KEEP), .height16 = 7, .onlyPalette = 3 + 1, .flags = DIORAMA_PROP_BLOCKED, \
+      .artMetatile = (wall) }
+#define FLAG_HIGH(id, rows) { PROP(id, FENCE, SLAB, 1, LOWER), .depth = 2, .standOn = (rows), .offsetZ = -3, \
+                              .lift16 = 7 }
+
 /* The Battle Frontier's east side: the round bushes round the Battle Tower and
  * along its terraces, all blocking the way, the same bush as Slateport's
  * (0x243). Added by the battle environments' work (docs/battle-environments.md):
@@ -482,7 +506,9 @@ static const struct DioramaProp sBattleFrontierOutsideEast[] = {
     WHITE_WALL(0x3C0), WHITE_WALL(0x3C1), WHITE_WALL(0x3C2), WHITE_WALL(0x3C3), WHITE_WALL(0x3C7),
     WHITE_WALL(0x3C8), WHITE_WALL(0x3C9), WHITE_WALL(0x3CA), WHITE_WALL(0x3CB), WHITE_WALL(0x3CC),
     WHITE_WALL(0x3CF), WHITE_WALL(0x3D0), WHITE_WALL(0x3D1), WHITE_WALL(0x3D2), WHITE_WALL(0x3DF),
-    WHITE_WALL(0x3F5), WHITE_WALL(0x3F6), WHITE_WALL(0x3F9), WHITE_WALL(0x3FD),
+    WHITE_WALL(0x3F9),
+    FLAG_POLE(0x3FD, 5, 0x066), FLAG_CLOTH(0x39E), FLAG_CLOTH(0x39F),
+    FLAG_POLE(0x3F5, 5, 0x05D), FLAG_CLOTH_ON_WALL(0x3F6, 0x05D), FLAG_CLOTH(0x3F7),
 };
 
 /* The Battle Frontier's west half: its low white walls (the General tileset's stones) round the plazas,
@@ -509,8 +535,11 @@ static const struct DioramaProp sBattleFrontierOutsideWest[] = {
     WHITE_WALL(0x267), WHITE_WALL(0x26C), WHITE_WALL(0x26D), WHITE_WALL(0x26F), WHITE_WALL(0x274),
     WHITE_WALL(0x275), WHITE_WALL(0x2E4), WHITE_WALL(0x2EC), WHITE_WALL(0x2F7), WHITE_WALL(0x328),
     WHITE_WALL(0x329), WHITE_WALL(0x32A), WHITE_WALL(0x32B), WHITE_WALL(0x32C), WHITE_WALL(0x32D),
-    WHITE_WALL(0x32E), WHITE_WALL(0x32F), WHITE_WALL(0x3CD), WHITE_WALL(0x3D6), WHITE_WALL(0x3D7),
-    WHITE_WALL(0x3F5), WHITE_WALL(0x3F6), WHITE_WALL(0x3FD),
+    WHITE_WALL(0x32E), WHITE_WALL(0x32F),
+    FLAG_POLE(0x3FD, 5, 0x066), FLAG_CLOTH(0x39E), FLAG_CLOTH(0x39F),
+    FLAG_POLE(0x3F5, 5, 0x05D), FLAG_CLOTH_ON_WALL(0x3F6, 0x05D), FLAG_CLOTH(0x3F7),
+    FLAG_POLE(0x3D6, -3, 0x26C), FLAG_POLE(0x3D7, -3, 0x26D), FLAG_POLE(0x3CD, -3, 0x056),
+    FLAG_HIGH(0x3CE, 1), FLAG_HIGH(0x3CF, 1), FLAG_HIGH(0x3C6, 2), FLAG_HIGH(0x3C7, 2),
 };
 
 /* Ever Grande City (step 16): the round bushes beside the League's path (the General tileset's bush on its
@@ -687,7 +716,9 @@ static void Index(void)
         {
             uint16_t id = sTilesets[t].props[i].metatileId;
 
-            if (id < DIORAMA_TILE_COUNT)
+            /* A metatile's first entry is the one found: an entry after one flagged
+             * DIORAMA_PROP_AND_NEXT is found through it alone. */
+            if (id < DIORAMA_TILE_COUNT && sEntryIndex[t][id] == 0)
                 sEntryIndex[t][id] = (uint8_t)(i + 1);
         }
         for (r = 0; r < gDioramaTilesetV2Count; r++)
@@ -962,6 +993,118 @@ static float Phase(int x, int y)
     return (float)(h & 0xFFFF) / 65536.0f * 6.2831853f;
 }
 
+/* One prop of a cell, as instances (DioramaProps_Build); false when the list has no room for it. */
+static bool BuildProp(const struct DioramaSceneSnapshot *snapshot,
+                      const struct DioramaResolvedCell *resolvedCells, int i, const struct DioramaProp *prop,
+                      int16_t occupied[][2], unsigned occupiedCount,
+                      struct DioramaPropInstance *instances, unsigned capacity, unsigned *count)
+{
+    const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
+    const struct DioramaResolvedCell *ground = &resolvedCells[i];
+    struct DioramaPropInstance base;
+    unsigned parts;
+    bool grassAtFeet;
+    unsigned p;
+
+    if (prop->standOn != 0)
+    {
+        int baseIndex;
+
+        const struct DioramaCellSnapshot *baseCell;
+        const struct DioramaProp *baseProp;
+
+        /* A part over another cell (a lamp's head): it stands on that
+         * cell's ground, so without the rest of it there it is left out. */
+        baseCell = GridCell(snapshot, cell->mapX, cell->mapY + prop->standOn, &baseIndex);
+        baseProp = baseCell != NULL ? DioramaProps_ForCell(snapshot, baseCell) : NULL;
+        if (baseProp == NULL || baseProp->kind != prop->kind || baseProp->standOn != 0)
+            return true;
+        ground = &resolvedCells[baseIndex];
+    }
+    memset(&base, 0, sizeof(base));
+    base.x = (float)cell->mapX + prop->offsetX / 16.0f;
+    base.z = -((float)cell->mapY + prop->standOn + prop->offsetZ / 16.0f);
+    base.y = ground->topHeight + (float)prop->standOn + prop->lift16 / 16.0f;
+    base.yaw = prop->facing ? 1.5707963f : 0.0f;
+    base.width = 1.0f;
+    base.height = (prop->height16 != 0 ? prop->height16 : 16) / 16.0f;
+    if (prop->form == DIORAMA_PROP_BLOCK || prop->form == DIORAMA_PROP_MOUND)
+    {
+        base.depth = (prop->depth != 0 ? prop->depth : 16) / 16.0f;
+        base.rise = prop->rise16 / 16.0f;
+    }
+    else
+        base.depth = (prop->depth != 0 ? prop->depth : 1) / 16.0f;
+    if (prop->form == DIORAMA_PROP_RELIEF)
+        /* Its back on the cell's north edge, bulging south. */
+        base.z += 0.5f - base.depth * 0.5f;
+    base.sway = (prop->flags & DIORAMA_PROP_SWAY) ? 0.05f * Wind(snapshot->weather) : 0.0f;
+    base.phase = Phase(cell->mapX, cell->mapY);
+    if (prop->form == DIORAMA_PROP_CARDS)
+    {
+        unsigned o;
+
+        for (o = 0; o < occupiedCount; o++)
+            if (occupied[o][0] == cell->mapX && occupied[o][1] == cell->mapY)
+                base.rustle = 1.0f;
+    }
+    base.cellIndex = (uint16_t)i;
+    base.artSlot = ArtSlot(cell, prop);
+    base.artTop = prop->artTop;
+    base.artBottom = DioramaProps_ArtBottom(prop);
+    base.kind = prop->kind;
+    base.flags = prop->flags;
+    base.prop = prop;
+    if (base.artSlot == DIORAMA_ATLAS_NO_SLOT)
+        return true;
+    /* Tall grass stands up only round a walker (TALL_GRASS): standing cards on every cell, each
+     * over the same blades drawn flat on the ground, turned a field of it into dark stripes. */
+    grassAtFeet = prop->kind == DIORAMA_PROP_KIND_GRASS && prop->form == DIORAMA_PROP_CARDS;
+    if (grassAtFeet && base.rustle == 0.0f)
+        return true;
+    parts = grassAtFeet ? 1 : prop->form == DIORAMA_PROP_CROSS || prop->form == DIORAMA_PROP_CARDS ? 2 : 1;
+    if (*count + parts > capacity)
+        return false;
+    for (p = 0; p < parts; p++)
+    {
+        struct DioramaPropInstance *instance = &instances[(*count)++];
+
+        *instance = base;
+        if (prop->form == DIORAMA_PROP_CROSS)
+            instance->yaw = p == 0 ? 0.0f : 1.5707963f;
+        else if (prop->form == DIORAMA_PROP_CARDS)
+        {
+            /* The art's top half a quarter tile north, its bottom half a
+             * quarter south, each standing on the ground. */
+            uint8_t bottom = DioramaProps_ArtBottom(prop);
+            uint8_t middle = (uint8_t)((prop->artTop + bottom) / 2);
+
+            unsigned half = grassAtFeet ? 1 : p; /* at a walker's feet: the front half only */
+
+            instance->artTop = half == 0 ? prop->artTop : middle;
+            instance->artBottom = half == 0 ? middle : bottom;
+            instance->z = base.z + (half == 0 ? 0.25f : -0.25f);
+            instance->phase = base.phase + (float)p * 1.3f;
+        }
+    }
+    return true;
+}
+
+/* The prop after `prop` on the same cell: the catalogue's next entry when `prop` is flagged
+ * DIORAMA_PROP_AND_NEXT (a flagpole and the low wall it stands on, one metatile), as
+ * DioramaProps_ForCell would give it; NULL for none. */
+static const struct DioramaProp *NextOnCell(const struct DioramaCellSnapshot *cell,
+                                            const struct DioramaProp *prop)
+{
+    while (prop->flags & DIORAMA_PROP_AND_NEXT)
+    {
+        prop++;
+        if (!((prop->flags & DIORAMA_PROP_BLOCKED) && cell->collision == 0))
+            return prop;
+    }
+    return NULL;
+}
+
 unsigned DioramaProps_Build(const struct DioramaSceneSnapshot *snapshot,
                             const struct DioramaResolvedCell *resolvedCells,
                             struct DioramaPropInstance *instances, unsigned capacity,
@@ -996,101 +1139,19 @@ unsigned DioramaProps_Build(const struct DioramaSceneSnapshot *snapshot,
     {
         const struct DioramaCellSnapshot *cell = &snapshot->cells[i];
         const struct DioramaProp *prop = DioramaProps_ForCell(snapshot, cell);
-        const struct DioramaResolvedCell *ground = &resolvedCells[i];
-        struct DioramaPropInstance base;
-        unsigned parts;
-        bool grassAtFeet;
-        unsigned p;
 
         if (prop == NULL || resolvedCells[i].pixelObjectId != 0)
             continue;
         if (sCellTaken != NULL && (cell->flags & DIORAMA_CELL_SOURCE_VALID)
          && sCellTaken(cell->sourceLayoutId, cell->sourceMapX, cell->sourceMapY))
             continue;
-        if (prop->standOn != 0)
-        {
-            int baseIndex;
-
-            const struct DioramaCellSnapshot *baseCell;
-            const struct DioramaProp *baseProp;
-
-            /* A part over another cell (a lamp's head): it stands on that
-             * cell's ground, so without the rest of it there it is left out. */
-            baseCell = GridCell(snapshot, cell->mapX, cell->mapY + prop->standOn, &baseIndex);
-            baseProp = baseCell != NULL ? DioramaProps_ForCell(snapshot, baseCell) : NULL;
-            if (baseProp == NULL || baseProp->kind != prop->kind || baseProp->standOn != 0)
-                continue;
-            ground = &resolvedCells[baseIndex];
-        }
-        memset(&base, 0, sizeof(base));
-        base.x = (float)cell->mapX + prop->offsetX / 16.0f;
-        base.z = -((float)cell->mapY + prop->standOn + prop->offsetZ / 16.0f);
-        base.y = ground->topHeight + (float)prop->standOn + prop->lift16 / 16.0f;
-        base.yaw = prop->facing ? 1.5707963f : 0.0f;
-        base.width = 1.0f;
-        base.height = (prop->height16 != 0 ? prop->height16 : 16) / 16.0f;
-        if (prop->form == DIORAMA_PROP_BLOCK || prop->form == DIORAMA_PROP_MOUND)
-        {
-            base.depth = (prop->depth != 0 ? prop->depth : 16) / 16.0f;
-            base.rise = prop->rise16 / 16.0f;
-        }
-        else
-            base.depth = (prop->depth != 0 ? prop->depth : 1) / 16.0f;
-        if (prop->form == DIORAMA_PROP_RELIEF)
-            /* Its back on the cell's north edge, bulging south. */
-            base.z += 0.5f - base.depth * 0.5f;
-        base.sway = (prop->flags & DIORAMA_PROP_SWAY) ? 0.05f * Wind(snapshot->weather) : 0.0f;
-        base.phase = Phase(cell->mapX, cell->mapY);
-        if (prop->form == DIORAMA_PROP_CARDS)
-        {
-            unsigned o;
-
-            for (o = 0; o < occupiedCount; o++)
-                if (occupied[o][0] == cell->mapX && occupied[o][1] == cell->mapY)
-                    base.rustle = 1.0f;
-        }
-        base.cellIndex = (uint16_t)i;
-        base.artSlot = ArtSlot(cell, prop);
-        base.artTop = prop->artTop;
-        base.artBottom = DioramaProps_ArtBottom(prop);
-        base.kind = prop->kind;
-        base.flags = prop->flags;
-        base.prop = prop;
-        if (base.artSlot == DIORAMA_ATLAS_NO_SLOT)
-            continue;
-        /* Tall grass stands up only round a walker (TALL_GRASS): standing cards on every cell, each
-         * over the same blades drawn flat on the ground, turned a field of it into dark stripes. */
-        grassAtFeet = prop->kind == DIORAMA_PROP_KIND_GRASS && prop->form == DIORAMA_PROP_CARDS;
-        if (grassAtFeet && base.rustle == 0.0f)
-            continue;
-        parts = grassAtFeet ? 1 : prop->form == DIORAMA_PROP_CROSS || prop->form == DIORAMA_PROP_CARDS ? 2 : 1;
-        if (count + parts > capacity)
-        {
-            *complete = false;
-            break;
-        }
-        for (p = 0; p < parts; p++)
-        {
-            struct DioramaPropInstance *instance = &instances[count++];
-
-            *instance = base;
-            if (prop->form == DIORAMA_PROP_CROSS)
-                instance->yaw = p == 0 ? 0.0f : 1.5707963f;
-            else if (prop->form == DIORAMA_PROP_CARDS)
+        for (; prop != NULL; prop = NextOnCell(cell, prop))
+            if (!BuildProp(snapshot, resolvedCells, i, prop, occupied, occupiedCount, instances, capacity,
+                           &count))
             {
-                /* The art's top half a quarter tile north, its bottom half a
-                 * quarter south, each standing on the ground. */
-                uint8_t bottom = DioramaProps_ArtBottom(prop);
-                uint8_t middle = (uint8_t)((prop->artTop + bottom) / 2);
-
-                unsigned half = grassAtFeet ? 1 : p; /* at a walker's feet: the front half only */
-
-                instance->artTop = half == 0 ? prop->artTop : middle;
-                instance->artBottom = half == 0 ? middle : bottom;
-                instance->z = base.z + (half == 0 ? 0.25f : -0.25f);
-                instance->phase = base.phase + (float)p * 1.3f;
+                *complete = false;
+                return count;
             }
-        }
     }
     return count;
 }

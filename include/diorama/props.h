@@ -83,6 +83,9 @@ enum DioramaPropFlags
      * formation's corner, beside a cell of its own top, is the formation's. */
     DIORAMA_PROP_PAIR_EAST = 1 << 4,
     DIORAMA_PROP_PAIR_WEST = 1 << 5,
+    /* The catalogue's next entry, the same metatile's, stands on the cell too (a flagpole and the low
+     * wall it stands on): that entry is found through this one alone. */
+    DIORAMA_PROP_AND_NEXT = 1 << 6,
 };
 
 #define DIORAMA_PROP_OWN_ART 0

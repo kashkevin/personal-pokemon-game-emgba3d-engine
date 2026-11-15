@@ -105,8 +105,19 @@ static void TestCatalogue(void)
              * secondary's from 512. */
             CHECK(strcmp(tilesets[t].symbol, "gTileset_General") == 0 ? prop->metatileId < 0x200
                                                                        : prop->metatileId >= 0x200);
+            /* A metatile has one entry, or a chain of them one after the other, each flagged
+             * DIORAMA_PROP_AND_NEXT but its last (a flagpole and the low wall it stands on). */
             for (j = 0; j < i; j++)
-                CHECK(tilesets[t].props[j].metatileId != prop->metatileId);
+                if (tilesets[t].props[j].metatileId == prop->metatileId)
+                {
+                    unsigned k;
+
+                    for (k = j; k < i; k++)
+                        CHECK(tilesets[t].props[k].metatileId == prop->metatileId
+                              && (tilesets[t].props[k].flags & DIORAMA_PROP_AND_NEXT));
+                }
+            CHECK(!(prop->flags & DIORAMA_PROP_AND_NEXT)
+                  || (i + 1 < tilesets[t].count && tilesets[t].props[i + 1].metatileId == prop->metatileId));
             CHECK(strcmp(DioramaProps_KindName(prop->kind), "?") != 0);
         }
     }
@@ -524,6 +535,100 @@ static void TestFrontierArch(void)
     CHECK(DioramaProps_Find(LAYOUT_LITTLEROOT_TOWN, 0x23C) == NULL);
 }
 
+/* Count a build's instances by kind: the low walls (blocks), the rest (the poles and the cloths) checked on
+ * their plane `z` (scene terms), each at the height its row over the pole's foot gives. */
+static void CountFlag(unsigned count, float z, int footRow, unsigned *walls, unsigned *flags)
+{
+    unsigned i;
+
+    *walls = *flags = 0;
+    for (i = 0; i < count; i++)
+    {
+        const struct DioramaPropInstance *instance = &sInstances[i];
+        const struct DioramaCellSnapshot *cell = &sSnapshot.cells[instance->cellIndex];
+
+        if (instance->prop->form == DIORAMA_PROP_BLOCK)
+        {
+            (*walls)++;
+            CHECK(Near(instance->y, 0.5f) && Near(instance->height, 7.0f / 16.0f));
+            continue;
+        }
+        (*flags)++;
+        CHECK(Near(instance->z, z) && Near(instance->x, (float)cell->mapX));
+        /* on the wall's top, a tile up for each row the art is over the pole's foot */
+        CHECK(Near(instance->y, 0.5f + (float)(footRow - cell->mapY) + 7.0f / 16.0f));
+    }
+}
+
+/* The Battle Frontier's yellow flags, three designs: the pole on a low wall's cell and that wall, two props of
+ * one metatile, the wall drawn from a plain wall's cell of the same lower layer; the cloth on the cells north,
+ * standing on the pole's line a tile up for each row. */
+static void TestFrontierFlag(void)
+{
+    bool complete;
+    unsigned count;
+    unsigned walls;
+    unsigned flags;
+    uint16_t metatile;
+    uint8_t layer;
+
+    /* on a wall facing north over the plaza: the pole on 0x3FD, the plain wall 0x066 east of it */
+    MakeSnapshot(LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST, 0.5f);
+    Put(60, 59, 0x39E);
+    Put(61, 59, 0x39F);
+    Put(60, 60, 0x3FD);
+    Put(61, 60, 0x066);
+    sSnapshot.cells[CellIndex(60, 60)].collision = 1;
+    sSnapshot.cells[CellIndex(61, 60)].collision = 1;
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 64, &complete);
+    CHECK(count == 5 && complete);
+    CountFlag(count, -(60.0f + 5.0f / 16.0f), 60, &walls, &flags);
+    CHECK(walls == 2 && flags == 3);
+    CHECK(DioramaProps_Find(LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST, 0x3FD)->flags & DIORAMA_PROP_AND_NEXT);
+    CHECK(DioramaProps_Find(LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST, 0x3FD)[1].artMetatile == 0x066);
+    /* the pole's cell: the flag no longer painted on its ground, the plaza and the stones are */
+    CHECK(DioramaProps_GroundMaterial(&sSnapshot, CellIndex(60, 60), &metatile, &layer));
+    CHECK(metatile == 0x3FD && layer == DIORAMA_MATERIAL_BASE);
+    /* a cloth hanging over the plaza stands all the same (a wall's end) */
+    Put(61, 60, GRASS);
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 64, &complete);
+    CountFlag(count, -(60.0f + 5.0f / 16.0f), 60, &walls, &flags);
+    CHECK(count == 4 && complete && walls == 1 && flags == 3);
+    /* a full list stops at the pole's wall, as anywhere */
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 2, &complete);
+    CHECK(count == 2 && !complete);
+
+    /* on a wall running north-south: the pole on 0x3F5, the cloth on 0x3F6 (the wall's cell too) and 0x3F7 */
+    MakeSnapshot(LAYOUT_BATTLE_FRONTIER_OUTSIDE_EAST, 0.5f);
+    Put(60, 60, 0x3F6);
+    Put(61, 60, 0x3F7);
+    Put(60, 61, 0x3F5);
+    sSnapshot.cells[CellIndex(60, 60)].collision = 1;
+    sSnapshot.cells[CellIndex(60, 61)].collision = 1;
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 64, &complete);
+    CHECK(count == 5 && complete);
+    CountFlag(count, -(61.0f + 5.0f / 16.0f), 61, &walls, &flags);
+    CHECK(walls == 2 && flags == 3);
+
+    /* on a wall facing south against the sea: the pole on 0x3D6, the cloth two rows over it, standing on the
+     * wall's cells (the plain wall 0x26D under its east half) */
+    MakeSnapshot(LAYOUT_BATTLE_FRONTIER_OUTSIDE_WEST, 0.5f);
+    Put(60, 58, 0x3C6);
+    Put(61, 58, 0x3C7);
+    Put(60, 59, 0x3CE);
+    Put(61, 59, 0x3CF);
+    Put(60, 60, 0x3D6);
+    Put(61, 60, 0x26D);
+    sSnapshot.cells[CellIndex(60, 60)].collision = 1;
+    sSnapshot.cells[CellIndex(61, 60)].collision = 1;
+    count = DioramaProps_Build(&sSnapshot, sResolved, sInstances, 64, &complete);
+    CHECK(count == 7 && complete);
+    CountFlag(count, -(60.0f - 3.0f / 16.0f), 60, &walls, &flags);
+    CHECK(walls == 2 && flags == 5);
+    /* these ids are other art on the east half's tileset */
+    CHECK(DioramaProps_Find(LAYOUT_BATTLE_FRONTIER_OUTSIDE_EAST, 0x3C6) == NULL);
+}
+
 /* The Battle Arena's gate: 7 x 5 cells, the posts' feet its last row (map row 60 here); the same, on one plane
  * 2 pixels south of the feet row's middle, the feet standing 11 rows; the path through it (General's) is left. */
 static void TestArenaGate(void)
@@ -697,6 +802,7 @@ int main(void)
     TestTallGrass();
     TestLampAndFences();
     TestFrontierArch();
+    TestFrontierFlag();
     TestArenaGate();
     TestSeaRockHalves();
     TestStall();
