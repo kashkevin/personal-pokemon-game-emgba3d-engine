@@ -158,5 +158,26 @@ class ArenaLobbyTests(unittest.TestCase):
         self.assertEqual({px[(x, 48)] for x in range(32)}, {"eee6a4"})
 
 
+
+class TrickHousePuzzleWallTests(unittest.TestCase):
+    """Trick House puzzles 5 and 8 stood worse read off their cells than flat (the object audit's survey of
+    2026-11-15); their back wall, which lay on the floor, stands by hand as the other puzzles' read wall."""
+
+    def test_the_wall_is_the_other_puzzles(self):
+        import battle_room_auto as bra
+        ground, pieces, notes = bra.analyse("LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE4")
+        read = {pc["name"]: pc for pc in pieces}["wall_0_0"]
+        for n in (5, 8):
+            layout_id = "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE%d" % n
+            wall = own_pieces(layout_id)["wall"]
+            self.assertEqual((wall["shape"], wall["height"], wall["foot"], wall["side"]),
+                             (read["shape"], read["height"], read["foot"], read["side"]), layout_id)
+            # the same back wall drawn: its two rows as puzzle 4's
+            mine, theirs = vb.LayoutArt(layout_id), vb.LayoutArt("LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE4")
+            self.assertEqual([mine.metatile(x, y) for y in range(2) for x in range(15)],
+                             [theirs.metatile(x, y) for y in range(2) for x in range(15)], layout_id)
+            self.assertEqual(list(own_pieces(layout_id)), ["wall"], layout_id)
+
+
 if __name__ == "__main__":
     unittest.main()

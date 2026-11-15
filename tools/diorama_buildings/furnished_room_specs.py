@@ -997,6 +997,24 @@ def arena_lobby():
         piece("wall", [(0, 0, 256, 48)], 48, fill=16, foot=48, side=ARENA_LOBBY_WALL_SIDE),
     ])
 
+
+# ── The Trick House's puzzles 5 and 8 (Route 110) ──────────────────────────
+#
+# 15 x 22 cells, the Trick House's puzzle tileset. The other puzzles are read off their cells
+# (battle_room_auto, AUTO_ROOMS); read so, these two stood worse than flat (the object audit's survey
+# of 2026-11-15: puzzle 5's blue squares as blocks that hid the player, puzzle 8's boulders as cubes).
+# Their back wall - its drawn two rows, the exit door on to the Trick House's last room drawn on its
+# face (the warp at 13, 1) - lay on the floor; it stands as the other puzzles' (one piece, 32 rows on
+# its foot), and the rest is the terrain's as before (puzzle 8's boulders stand as the terrain's
+# rounded rocks).
+
+TRICK_HOUSE_WALL_SIDE = (0, 0, 16, 32)      # the wall's first panel, as the other puzzles'
+
+
+def trick_house_puzzle_wall():
+    facet, own_shell, piece = _helpers()
+    return own_shell([piece("wall", [(0, 0, 240, 32)], 32, fill=16, foot=32, side=TRICK_HOUSE_WALL_SIDE)])
+
 # ── The Pokemon League 1F (Ever Grande City) ───────────────────────────────
 #
 # 19 x 12 cells, the Pokemon Center's tiles in a wider room, with no model of its own until the object
@@ -2099,6 +2117,16 @@ def furnished_room_specs():
             "name": "league_1f",
             "interior": {"layout": "LAYOUT_EVER_GRANDE_CITY_POKEMON_LEAGUE_1F", "ground": [0x240],
                          "under": "own", "reuse_in": frozenset(), "pieces": league_1f()},
+        },
+        {
+            "name": "trick_house_puzzle5",
+            "interior": {"layout": "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE5", "ground": [0x210],
+                         "under": "own", "reuse_in": frozenset(), "pieces": trick_house_puzzle_wall()},
+        },
+        {
+            "name": "trick_house_puzzle8",
+            "interior": {"layout": "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE8", "ground": [0x210],
+                         "under": "own", "reuse_in": frozenset(), "pieces": trick_house_puzzle_wall()},
         },
         {
             "name": "arena_lobby",
