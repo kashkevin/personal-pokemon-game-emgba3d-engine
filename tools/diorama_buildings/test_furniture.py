@@ -103,5 +103,44 @@ class DresserSideTests(unittest.TestCase):
                 self.assertLessEqual(set(px.values()), colours)
 
 
+
+class EverGrandeHallTests(unittest.TestCase):
+    """Ever Grande City's halls between the Elite Four's rooms had no model: their back wall with the doorway
+    lay on the landing and their railings lay on the stairs' slope (the object audit, class 1). The terrain
+    raises the landing in place and a model stands on the ground under its door, so the wall stands on the
+    landing and each railing's row, a piece of its own, on its step."""
+
+    HALLS = (("LAYOUT_EVER_GRANDE_CITY_SHORT_HALL", 13), ("LAYOUT_EVER_GRANDE_CITY_HALL4", 34))
+
+    def test_the_doorway_is_cut_out_of_the_wall(self):
+        for layout_id, rows in self.HALLS:
+            pieces = own_pieces(layout_id)
+            wall = pieces["wall"]
+            # the opening x 77-99 under the lintel (rows 0-25); the warp's cell is the doorway's
+            self.assertIn((77, 0, 99, 25), wall["shape"], layout_id)
+            self.assertFalse([r for r in wall["shape"] if r[0] < 99 and 77 < r[2] and r[3] > 25], layout_id)
+            self.assertEqual(list(wall["free"]), [(5, 2)], layout_id)
+            self.assertEqual(pieces["stairwell_door"]["inside"], (77, 25, 99, 48), layout_id)
+            px = drawing(vb.LayoutArt(layout_id), 77, 25, 99, 48)
+            # the opening is the arch's dark, its jambs' light edges and its outline
+            self.assertLessEqual(set(px.values()), {"414a6a", "316a7b", "94bdb4", "417ba4"}, layout_id)
+
+    def test_a_railing_piece_a_row_on_each_side(self):
+        for layout_id, rows in self.HALLS:
+            pieces = own_pieces(layout_id)
+            L = vb.LayoutArt(layout_id)
+            for y in range(5, rows):
+                for side, (x0, x1) in (("w", (51, 64)), ("e", (112, 125))):
+                    pc = pieces["rail_%s_%d" % (side, y)]
+                    self.assertEqual(pc["shape"], [(x0, y * 16, x0 + (x1 - x0), y * 16 + 16)])
+                    # its edges the rail's outline, the stone or the landing past them
+                    px = drawing(L, x0 - 1, y * 16 + 8, x1 + 1, y * 16 + 9)
+                    self.assertEqual((px[(x0, y * 16 + 8)], px[(x1 - 1, y * 16 + 8)]), (OUTLINE, OUTLINE),
+                                     (layout_id, side, y))
+                    self.assertIn(px[(x0 - 1, y * 16 + 8)] if side == "w" else px[(x1, y * 16 + 8)],
+                                  pc["leave"], (layout_id, side, y))
+            self.assertFalse([n for n in pieces if n.startswith("rail_") and int(n.split("_")[2]) >= rows])
+
+
 if __name__ == "__main__":
     unittest.main()

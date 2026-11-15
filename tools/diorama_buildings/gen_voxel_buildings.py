@@ -1935,10 +1935,14 @@ def export(models, path):
             placements.append((lid, pm_of[index], px, py, ground, len(verts) // 6 - first, first))
     placements.sort()
     nverts = len(verts) // 6
-    # ctr_voxel.c keeps a flag a page (VOXEL_MAX_PAGES), and a page larger
-    # than half its VRAM block cannot share it with the next map's
-    if len(pages) > 256:
-        raise SystemExit("%d texture pages: the console knows 256" % len(pages))
+    # The 3DS renderer this format was made for (ctr_voxel.c) kept a flag a page,
+    # 256 of them (VOXEL_MAX_PAGES); it is not built here. The PC game counts
+    # pages in 16 bits and makes a texture of each page a map uses, when it is
+    # used (buildings.c, gl_building_renderer.c: the page arrays sized by the
+    # count, the window runs' pages 16 bits): the object audit's rooms of
+    # 2026-11-15 took the 256th and on (a page a modelled layout).
+    if len(pages) > 0xFFFF:
+        raise SystemExit("%d texture pages: the format counts 65535" % len(pages))
     variants = ground_variants(models, layouts_json)
     head = MAGIC + struct.pack("<HHHHHHIHH", len(pages), len(models), len(page_models),
                                len(placements), len(heights), len(masks), nverts,

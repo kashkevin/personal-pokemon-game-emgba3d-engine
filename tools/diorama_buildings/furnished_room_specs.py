@@ -945,6 +945,39 @@ def dome_corridor():
     ])
 
 
+
+# ── Ever Grande City's halls between the Elite Four's rooms ───────────────
+#
+# 11 cells wide: the short hall (13 rows; halls 1, 2, 3 and 5) and hall 4 (34 rows, before the
+# Champion's room). The back wall (rows 0-48: its blue top band, its face with the lamps), and in it
+# the arch of the doorway on to the next room - its dark opening x 77-99 from row 25, walked into (the
+# warp at 5, 2); the landing before it (rows 48-80); the staircase down to the hall's foot between two
+# orange railings (x 51-64 and 112-125, the rail's rounded top on row 5) over the dark floor either
+# side. The terrain raises the landing and the wall's cells in place and ramps the stairs
+# (terrace_topology.hall_stairs), and a model stands on the ground under its door
+# (gl_building_renderer.c PlacementGround): the wall stands on the landing, and each railing's row,
+# a piece of its own, on its step. Before, the back wall with its doorway lay on the landing and the
+# railings lay on the slope as flat strips (the object audit of 2026-11-14, class 1). As the League
+# 1F's: the doorway cut out of the wall under its lintel, its recess behind it in the opening's dark.
+
+HALL_WALL_SIDE = (24, 0, 40, 48)               # a panel of the back wall between its lamps
+HALL_RAIL_FLOOR = ("949c9c", "cddeee", "94bdb4")   # the stone edge, the landing, its shade
+HALL_RAIL_TALL = 8
+
+
+def ever_grande_hall(rows):
+    """The hall `rows` cells long: the back wall, the doorway's recess, a railing piece a row."""
+    facet, own_shell, piece = _helpers()
+    import voxel_building_specs as v
+    rails = [piece("rail_%s_%d" % (side, y), [(x0, y * 16, x1, y * 16 + 16)], HALL_RAIL_TALL,
+                   leave=HALL_RAIL_FLOOR, solid=True)
+             for y in range(5, rows) for side, (x0, x1) in (("w", (51, 64)), ("e", (112, 125)))]
+    return own_shell(rails + [
+        v.stairwell("stairwell_door", 77, 99, 48, 25, 23, (80, 30, 96, 46), 0),
+        piece("wall", [(0, 0, 77, 48), (99, 0, 176, 48), (77, 0, 99, 25)], 48, fill=16, foot=48,
+              side=HALL_WALL_SIDE, free=[(5, 2)]),
+    ])
+
 # ── The Pokemon League 1F (Ever Grande City) ───────────────────────────────
 #
 # 19 x 12 cells, the Pokemon Center's tiles in a wider room, with no model of its own until the object
@@ -2047,6 +2080,16 @@ def furnished_room_specs():
             "name": "league_1f",
             "interior": {"layout": "LAYOUT_EVER_GRANDE_CITY_POKEMON_LEAGUE_1F", "ground": [0x240],
                          "under": "own", "reuse_in": frozenset(), "pieces": league_1f()},
+        },
+        {
+            "name": "ever_grande_short_hall",
+            "interior": {"layout": "LAYOUT_EVER_GRANDE_CITY_SHORT_HALL", "ground": [0x2D0],
+                         "under": "own", "reuse_in": frozenset(), "pieces": ever_grande_hall(13)},
+        },
+        {
+            "name": "ever_grande_hall4",
+            "interior": {"layout": "LAYOUT_EVER_GRANDE_CITY_HALL4", "ground": [0x2D0],
+                         "under": "own", "reuse_in": frozenset(), "pieces": ever_grande_hall(34)},
         },
         {
             "name": "dome_lobby",
