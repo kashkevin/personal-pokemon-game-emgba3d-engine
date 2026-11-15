@@ -310,5 +310,92 @@ class TrainerHillFloorTests(unittest.TestCase):
             self.assertEqual(rows, {13, 14, 15})
 
 
+class TrainerHillEntranceTests(unittest.TestCase):
+    """Trainer Hill's entrance (the object audit's class 1): its counters, machines and stools lay drawn on the floor;
+    cut by hand. Its machines' feet are drawn on their cells' lower layer, where the layer above draws the counter
+    or nothing at all - a card of the cell's upper layer alone stood in the wall or lay half flat."""
+
+    LAYOUT = "LAYOUT_TRAINER_HILL_ENTRANCE"
+
+    def test_the_machines_feet_are_on_the_lower_layer(self):
+        import furnished_room_specs as frs
+        L = vb.LayoutArt(self.LAYOUT)
+        for (cx, cy) in ((2, 9), (3, 9), (6, 9)):
+            m = L.metatile(cx, cy)
+            a = L.cell_image(m).convert("RGB").load()
+            b = L.cell_image(m, layers=(0,)).convert("RGB").load()
+            # the machine's foot on the lower layer, the counter's top over it from row 12 on
+            self.assertEqual({j for j in range(16) for i in range(16) if a[i, j] != b[i, j]}, {12, 13, 14, 15})
+        # the terminal's body: nothing on its upper layer at all
+        m = L.metatile(0, 10)
+        self.assertEqual(m, 0x004)
+        a = L.cell_image(m).convert("RGB").load()
+        b = L.cell_image(m, layers=(0,)).convert("RGB").load()
+        self.assertTrue(all(a[i, j] == b[i, j] for j in range(16) for i in range(16)))
+        # read off the clerks' floor, the scanner's foot is every pixel of its cells' rows 144-155
+        runs = frs.upper_apart(self.LAYOUT, [(2, 9), (3, 9)], (32, 144, 64, 156), floor=frs.TH_CLERKS_FLOOR)
+        self.assertEqual(sum(x1 - x0 for (x0, _, x1, _) in runs), 32 * 12)
+
+    def test_the_pieces(self):
+        pieces = own_pieces(self.LAYOUT)
+        self.assertEqual(sorted(pieces), sorted(
+            ["stool_%d" % cx for cx in (1, 2, 3, 15, 16, 17)]
+            + ["pc", "terminal", "scanner", "cabinet", "post", "counter_w", "counter_partition", "counter_e",
+               "counter_corridor_w", "counter_corridor_e", "counter_arm_w", "counter_arm_e", "stairwell_stairs",
+               "wall_corridor", "block_side_w", "block_side_e", "wall_panel_w", "wall_w", "wall_e", "side_w",
+               "side_e"]))
+        # the side walls from the back wall's foot - the west panel's, a pilaster 6 rows before it - to the front
+        self.assertEqual(pieces["side_w"]["walls"], [((0, 272), (0, 150))])
+        self.assertEqual(pieces["side_e"]["walls"], [((304, 144), (304, 272))])
+        self.assertEqual(pieces["wall_panel_w"]["foot"], 150)
+        self.assertEqual(pieces["wall_e"]["foot"], 144)
+        for name in ("pc", "terminal", "scanner", "cabinet", "post") + tuple("stool_%d" % cx for cx in
+                                                                            (1, 2, 3, 15, 16, 17)):
+            self.assertTrue(pieces[name]["card"], name)
+
+        def bottom(pc):
+            return max(d for (_, _, _, d) in pc["shape"])
+        # the scanner and the cabinet stand on the clerks' floor before the wall (its foot row 144), behind
+        # the counter's top (from row 156): never in the wall's plane, where they flickered with it
+        for name in ("scanner", "cabinet"):
+            self.assertEqual(bottom(pieces[name]), 156, name)
+            self.assertEqual(pieces[name]["not_floor"], [(pieces[name]["shape"][0][0] // 16 * 16, 144,
+                                                          pieces[name]["shape"][0][0] // 16 * 16 + (32 if name ==
+                                                                                                    "scanner" else 16),
+                                                          156)], name)
+        # the terminal stands on its foot (row 184); the cell in front of it is the lobby's other floor,
+        # laid as its own marks
+        self.assertEqual(bottom(pieces["terminal"]), 184)
+        self.assertEqual(pieces["terminal"]["not_floor"], [(0, 182, 16, 192)])
+        # the post stands on the east counter's top, behind its own foot drawn there
+        post = pieces["post"]
+        self.assertEqual(post["foot"], 168)
+        self.assertTrue(164 <= post["foot"] < 175)
+        # the partition: the counter's height, run back to the wall's face (its top drawn from row 136: 144 - 8),
+        # its top filled under the post, and before the counter, whose back rows it takes
+        part = pieces["counter_partition"]
+        self.assertEqual((part["shape"], part["height"], part["foot"], part["fill"]),
+                         ([(240, 136, 256, 160)], 8, 175, 3))
+        names = list(pieces)
+        self.assertLess(names.index("counter_partition"), names.index("counter_e"))
+        self.assertLess(names.index("post"), names.index("counter_partition"))
+        for name in ("counter_w", "counter_e", "counter_partition"):
+            self.assertEqual(pieces[name]["height"], 8, name)
+            self.assertTrue(pieces[name]["solid"], name)
+
+    def test_the_counters_stand_on_blocked_cells(self):
+        """Play is the GBA game's: no counter's foot runs over a cell the player walks on."""
+        L = vb.LayoutArt(self.LAYOUT)
+        pieces = own_pieces(self.LAYOUT)
+        for name, pc in pieces.items():
+            if not name.startswith("counter"):
+                continue
+            foot = pc["foot"] if pc["foot"] is not None else max(d for (_, _, _, d) in pc["shape"])
+            cy = (foot - 1) // 16
+            for (x0, _, x1, _) in pc["shape"]:
+                for cx in range(x0 // 16, (x1 - 1) // 16 + 1):
+                    self.assertNotEqual((L.blocks[cy * L.w + cx] >> 10) & 3, 0, (name, cx, cy))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1146,6 +1146,141 @@ def trainer_hill_floor():
         piece("block_mid", [(64, 0, 176, 80)], 32, fill=16, foot=80, side=HILL_WALL_SIDE, solid=True),
     ])
 
+
+# ── Trainer Hill's entrance ────────────────────────────────────────────────
+#
+# 19 x 17 cells. A lobby with a corridor north out of its back wall to the stairs up (the object audit's
+# class 1: it had no model, everything lay drawn on the floor; read off its cells its counters and walls
+# stood as slabs). From the top of the drawing:
+#
+#     rows 0-32     the corridor's back wall (x 112-192) with the doorway on to the stairs up (x 143-161, its
+#                   arch and dark as the floors' doorways), its foot row 32
+#     rows 0-144    the corridor's sides (x 104-112, 192-200): seen from above, their white tops run from the
+#                   corridor's back wall to the lobby's, where their faces are the lobby wall's ends
+#     rows 112-144  the lobby's back wall either side (its band, panels and teal skirting; the monitor and a blue
+#                   double door painted on it), its foot row 144; the white panel at its west end runs on to row 150
+#     rows 60-79    the corridor's two counters, their fronts rows 71-79 over the side lanes, the long arms
+#                   from them down the corridor (x 128-144, x 160-176) to the lobby's counters
+#     rows 124-175  the lobby's two counters: a bar along row 10 (its top from row 156, its front rows 167-175)
+#                   with an arm up each end - the west one from row 136 (its rows before behind the wall's face,
+#                   the wall's), the corridor's arms, the east one's partition under the post (x 240-256) - and
+#                   the gate (x 270-289) a step lower
+#     cards         what stands before the wall and on the floor: the scanner, the first-aid cabinet, the
+#                   PC at the west arm's foot, the terminal at the west end, the post on the partition, and
+#                   the three white stools either side of the lobby (rows 14-15)
+#
+# Collision, warps and events are untouched.
+
+TH_ENTRANCE = "LAYOUT_TRAINER_HILL_ENTRANCE"
+TH_LOBBY_SIDE = (32, 112, 48, 144)          # a panel of the lobby's back wall, band to skirting
+TH_CORRIDOR_SIDE = (112, 0, 128, 32)        # a panel of the corridor's back wall
+TH_COUNTER_SIDE = (48, 167, 64, 175)        # the counters' front: the teal edge, the slots, the grey
+TH_DOOR_DARK = (144, 16, 160, 18)           # the doorway's dark over the flight
+TH_CLERKS_FLOOR = 0x30d                     # the clerks' floor behind the west counter (its top the counter's)
+
+
+def upper_apart(layout_id, cells, box=None, floor=None):
+    """[(x0, y, x1, y + 1)]: the runs of `cells`' pixels drawn on their upper layer (where a cell differs from
+    its lower layer) - a thing standing over the floor or the wall - within `box` (x0, y0, x1, y1). A cell
+    with nothing on its upper layer (the west terminal's body, 0x004, drawn whole on the lower one) gives what
+    differs from the lobby floor's checker under it (0x331 where x + y is even, 0x330 where odd); with
+    `floor` (a metatile), what differs from that floor's drawing - a thing's foot drawn on the lower layer
+    of a cell whose upper one draws something else (the counter's top before the scanner's foot); there a
+    gap of a pixel or two in a row between the thing's pixels is the thing's too (a white highlight on the
+    floor's white at the same place: the scanner's and the cabinet's, five pixels)."""
+    import voxel_building as vb
+    L = vb.LayoutArt(layout_id)
+    out = []
+    for (cx, cy) in cells:
+        m = L.metatile(cx, cy)
+        a = L.cell_image(m).convert("RGBA").load()
+        b = L.cell_image(m, layers=(0,)).convert("RGBA").load()
+        if floor is not None:
+            b = L.cell_image(floor).convert("RGBA").load()
+        elif all(a[i, j] == b[i, j] for j in range(16) for i in range(16)):
+            b = L.cell_image(0x331 if (cx + cy) % 2 == 0 else 0x330).convert("RGBA").load()
+        for j in range(16):
+            y = cy * 16 + j
+            if box is not None and not box[1] <= y < box[3]:
+                continue
+            i = 0
+            while i < 16:
+                x = cx * 16 + i
+                if a[i, j] == b[i, j] or (box is not None and not box[0] <= x < box[2]):
+                    i += 1
+                    continue
+                start = i
+                while i < 16 and a[i, j] != b[i, j] and (box is None or box[0] <= cx * 16 + i < box[2]):
+                    i += 1
+                if (floor is not None and out and out[-1][1] == y and out[-1][0] >= cx * 16
+                        and 0 < cx * 16 + start - out[-1][2] <= 2):
+                    out[-1] = (out[-1][0], y, cx * 16 + i, y + 1)
+                else:
+                    out.append((cx * 16 + start, y, cx * 16 + i, y + 1))
+    return out
+
+
+def trainer_hill_entrance():
+    facet, own_shell, piece = _helpers()
+    import voxel_building_specs as v
+    stools = [piece("stool_%d" % cx, upper_apart(TH_ENTRANCE, [(cx, 14), (cx, 15)]), 24, card=True)
+              for cx in (1, 2, 3, 15, 16, 17)]
+    d0, d1 = 143, 161
+    arch = [(d0, 13, d0 + 3, 14), (d1 - 3, 13, d1, 14), (d0, 14, d0 + 2, 15), (d1 - 2, 14, d1, 15),
+            (d0, 15, d0 + 1, 16), (d1 - 1, 15, d1, 16)]
+    return own_shell(stools + [
+        # before the wall and on the floor: cards of their own pixels, their cells' upper layer
+        piece("pc", upper_apart(TH_ENTRANCE, [(8, 9), (8, 10)], (128, 145, 144, 176)), 32, card=True),
+        # (the terminal's foot cell is the lobby's other floor, the tiles round its foot: laid as its
+        # cell's own marks, not the room's floor - a card's floor - where they have the same colours)
+        dict(piece("terminal", upper_apart(TH_ENTRANCE, [(0, 9), (0, 10), (0, 11)]), 32, card=True),
+             not_floor=[(0, 182, 16, 192)]),
+        # behind the west counter, standing on the clerks' floor: their feet (rows 144-155) are drawn on
+        # their cells' lower layer, the counter's top (from row 156, the counter's) on the upper - what
+        # differs from that floor's drawing (0x30d, the strip between them) is theirs
+        dict(piece("scanner", upper_apart(TH_ENTRANCE, [(2, 8), (3, 8)]) +
+                   upper_apart(TH_ENTRANCE, [(2, 9), (3, 9)], (32, 144, 64, 156), floor=TH_CLERKS_FLOOR),
+                   28, card=True),
+             not_floor=[(32, 144, 64, 156)]),
+        dict(piece("cabinet", upper_apart(TH_ENTRANCE, [(6, 8)]) +
+                   upper_apart(TH_ENTRANCE, [(6, 9)], (96, 144, 112, 156), floor=TH_CLERKS_FLOOR),
+                   20, card=True),
+             not_floor=[(96, 144, 112, 156)]),
+        # (standing on the counter's top, just behind its foot drawn on the top: a card on the floor
+        # behind the partition stood in it)
+        piece("post", upper_apart(TH_ENTRANCE, [(15, 8), (15, 9), (15, 10)], (245, 128, 251, 164)), 37,
+              card=True, foot=168),
+        # the counters, 8 rows (the front's teal edge, slots and grey), their tops laid back
+        # (the west arm's first three drawn rows, behind the wall's face, are the wall's)
+        piece("counter_w", [(16, 136, 32, 175), (32, 156, 112, 175), (112, 124, 128, 175)], 8,
+              solid=True, side=TH_COUNTER_SIDE),
+        # the partition between the east counter's two places: its top run back to the wall's face (its
+        # first rows the wall's band, as the west arm's) and on over the counter's back rows, the
+        # counter's height; under the post standing on it its top is the partition's own teal three
+        # columns along (`fill`), not a slot to the floor
+        piece("counter_partition", [(240, 136, 256, 160)], 8, fill=3, foot=175, solid=True,
+              side=TH_COUNTER_SIDE),
+        piece("counter_e", [(176, 124, 192, 175), (192, 156, 304, 175)], 8, solid=True, side=TH_COUNTER_SIDE),
+        piece("counter_corridor_w", [(112, 60, 128, 79)], 8, solid=True, side=TH_COUNTER_SIDE),
+        piece("counter_corridor_e", [(176, 60, 192, 79)], 8, solid=True, side=TH_COUNTER_SIDE),
+        piece("counter_arm_w", [(128, 60, 144, 145)], 8, solid=True, side=TH_COUNTER_SIDE),
+        piece("counter_arm_e", [(160, 60, 176, 160)], 8, solid=True, side=TH_COUNTER_SIDE),
+        # the corridor's back wall and its doorway on to the stairs up
+        v.stairwell("stairwell_stairs", d0, d1, 32, 16, 19, TH_DOOR_DARK, 0),
+        piece("wall_corridor", [(112, 0, d0, 32), (d0, 0, d1, 13)] + arch + [(d1, 0, 192, 32)], 32,
+              fill=16, foot=32, side=TH_CORRIDOR_SIDE, free=[(9, 1)]),
+        # the corridor's sides: boxes as tall as the walls, their tops the white strips
+        piece("block_side_w", [(104, 0, 112, 144)], 32, fill=16, foot=144, solid=True, side=TH_LOBBY_SIDE),
+        piece("block_side_e", [(192, 0, 200, 144)], 32, fill=16, foot=144, solid=True, side=TH_LOBBY_SIDE),
+        # the lobby's back wall
+        piece("wall_panel_w", [(0, 112, 16, 150)], 38, fill=16, foot=150, side=TH_LOBBY_SIDE),
+        piece("wall_w", [(16, 112, 104, 144)], 32, fill=16, foot=144, side=TH_LOBBY_SIDE),
+        piece("wall_e", [(200, 112, 304, 144)], 32, fill=16, foot=144, side=TH_LOBBY_SIDE),
+        # and its side walls, which the drawing never shows, from the back wall's foot to the room's front
+        piece("side_w", [], 32, side=TH_LOBBY_SIDE, walls=[((0, 272), (0, 150))]),
+        piece("side_e", [], 32, side=TH_LOBBY_SIDE, walls=[((304, 144), (304, 272))]),
+    ])
+
 # ── The Pokemon League 1F (Ever Grande City) ───────────────────────────────
 #
 # 19 x 12 cells, the Pokemon Center's tiles in a wider room, with no model of its own until the object
@@ -2273,6 +2408,12 @@ def furnished_room_specs():
             "interior": {"layout": layout, "ground": [0x23B], "under": "own",
                          "reuse_in": frozenset(), "pieces": trainer_hill_floor()},
         } for layout in TRAINER_HILL_FLOORS
+    ] + [
+        {
+            "name": "trainer_hill_entrance",
+            "interior": {"layout": TH_ENTRANCE, "ground": [0x331, 0x330, 0x335, 0x316, 0x337], "under": "own",
+                         "reuse_in": frozenset(), "pieces": trainer_hill_entrance()},
+        },
     ] + [
         {
             "name": "arena_lobby",
