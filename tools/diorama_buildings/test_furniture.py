@@ -223,5 +223,22 @@ class PyramidLobbyTests(unittest.TestCase):
                 self.assertLessEqual(y1, 96, pc["name"])
 
 
+class DevonLobbyStripTests(unittest.TestCase):
+    """Devon's lobby (the object audit, class 3): its alcoves' side walls, drawn as their tops (orange strips 4
+    pixels wide), stand from the alcove's back wall to the lobby's; the room's carpet laid under their cells
+    showed at the edge of their decal as a dotted pink line down the black outside between the alcoves. Their
+    cells keep their own drawing under them - the black of the outside."""
+
+    def test_the_strips_stand_on_their_cells_own_drawing(self):
+        pieces = own_pieces("LAYOUT_RUSTBORO_CITY_DEVON_CORP_1F")
+        strips = [pc for name, pc in pieces.items() if name.startswith("edge_")]
+        self.assertEqual(sorted(pc["shape"][0][0] for pc in strips), [44, 144, 204, 256])
+        for pc in strips:
+            self.assertTrue(pc["own_floor"], pc["name"])
+        # and only they: the counter and the jars stand on the carpet
+        for name in ("counter", "jar_w", "jar_e"):
+            self.assertFalse(pieces[name]["own_floor"], name)
+
+
 if __name__ == "__main__":
     unittest.main()

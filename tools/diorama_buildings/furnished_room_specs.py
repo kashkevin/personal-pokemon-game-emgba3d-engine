@@ -1678,9 +1678,12 @@ DEVON_WALL_SIDE = (64, 4, 80, 32)
 def devon_lobby():
     facet, own_shell, piece = _helpers()
     # a strip is a side wall's top: at 30 rows it runs from the alcove's back wall to the lobby's
-    # (foot 78, behind the lobby wall's face; the cell below holds that foot)
+    # (foot 78, behind the lobby wall's face; the cell below holds that foot). Its cells keep their
+    # own drawing under it (`own_floor`): the room's carpet laid under them showed at the edge of
+    # their decal (half a pixel over it) as a dotted pink line down the black outside between the
+    # alcoves, from the game's cameras (the object audit, class 3: "Devon's lobby")
     strips = [piece("edge_%d" % x0, [(x0, 0, x0 + 4, 48)], 30, solid=True, side=DEVON_WALL_SIDE,
-                    foot=78, cells=[(x0 // 16, 4)])
+                    foot=78, cells=[(x0 // 16, 4)], own_floor=True)
               for x0 in (44, 144, 204, 256)]
     return own_shell([
         piece("counter", [(48, 62, 128, 80)], 8, leave=DEVON_FLOOR),
