@@ -252,6 +252,9 @@ AUTO_ROOMS = [
     # table its drawn front (THING_FRONT) and the holes in its floor lay as drawn (HOLES)
     "LAYOUT_ABANDONED_SHIP_ROOMS2_B1F",
     "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_CORRIDORS",
+    # the hidden floor's six cabins: proved once the desks against their back walls stood by hand (DESK)
+    # and the tables and bins there before the wall (THING_FRONT)
+    "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_ROOMS",
     "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_2F",
     # proved with its sand ridges' cross pieces left out (AUTO_DROP): the back wall and the
     # long ridges running from it stand

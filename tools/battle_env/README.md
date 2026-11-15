@@ -129,6 +129,13 @@ with its top run down its front, a table stacked on a table from the 3D cameras 
 survey of 2026-11-15). The holes in the Abandoned Ship's floor lie as drawn (`HOLES`), not dark
 blocks, and the walls between two cabins with a passage before them stand as two thin walls their
 drawn faces' height (`DIVIDER`), not one wall 48 rows tall with the outside's black for its face.
+The InsideShip tileset's desk against a back wall, its chair pushed in, is modelled by hand
+(`battle_room_auto.DESK`): read as walls, its columns were one run four rows deep and stood 48 rows,
+the desk and the chair painted upright on a slab over the cabin. The wall over it stands to its top
+row, the desk its front's rows (its apron and legs) with its top run back to the wall and a notch
+where the chair is, the chair a card before it; a table or a bin in a back wall's run stands as the
+thing it is, the wall over it to its row - and on the ship's tileset (`FOOT_ON_LENT`) also when it is
+another room's piece lent to this one, whose cells the reader is given as taken.
 
 What the proof cannot see: it compares the picture the GBA's camera sees. A piece that gives
 back its drawing exactly can still be wrong from the battle camera's angle - the survey's

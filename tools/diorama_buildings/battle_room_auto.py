@@ -176,6 +176,44 @@ HOLES = {
     "gTileset_InsideShip": {0x2AA, 0x2AB},
 }
 
+# Tilesets whose wall runs may end on a cell an earlier room's lent piece stands in (`taken`), as on the
+# floor. The InsideShip tileset's: the S.S. Tidal's tables and bins are lent to the Abandoned Ship's hidden
+# floor rooms, three of them before a back wall, and the wall over each lay flat behind it (the run's foot
+# was no floor) - pictured with the rooms' first model. Elsewhere it would change rooms the ships' work
+# never looked at (the Lavaridge Gym 1F, Mirage Tower 4F, the Space Center 1F: walls run down to pieces lent
+# them), so it is the ship's alone until those are looked at.
+FOOT_ON_LENT = {"gTileset_InsideShip"}
+
+# Desks against a cabin's back wall, by the secondary tileset: (the top row's two metatiles, the bottom
+# row's west ones - its carpet plain or in shade - and east one). The InsideShip tileset's desk, two cells
+# by two under the S.S. Tidal's and the Abandoned Ship's back walls, its chair pushed in: its top drawn
+# from above (rows 2-13 of its cells), its apron and legs (rows 14-23), and in front of them the chair's
+# back and legs (DESK_CHAIR). The reader took its columns for the back wall's, one run four rows deep,
+# and stood 48 rows of it: the desk and the chair painted upright on the wall's face, a slab over the
+# cabin (the object audit's survey of 2026-11-15). By hand (desk_pieces): the wall over it stands to its
+# top row, as the wall beside it; the desk stands its front's rows with its top run back to the wall, a
+# notch in its front where the chair is; the chair is a card in front of it, its back upright.
+DESK = {
+    "gTileset_InsideShip": ((0x299, 0x29A), ({0x2A0, 0x2A1}, 0x2A2)),
+}
+DESK_FRONT = 10                 # rows of the desk's front: its apron and legs, rows 14-23
+DESK_CHAIR = (10, 17, 23, 32)   # the chair in the desk's two cells: x0, y0, x1, y1
+
+
+def desks(layout):
+    """[(x, y)] of the desks (DESK) a layout has, by their top row's west cell."""
+    spec = DESK.get(layout.secondary)
+    found = []
+    if not spec:
+        return found
+    (top_w, top_e), (bottom_w, bottom_e) = spec
+    for y in range(layout.h - 1):
+        for x in range(layout.w - 1):
+            if (layout.metatile(x, y), layout.metatile(x + 1, y)) == (top_w, top_e) \
+                    and layout.metatile(x, y + 1) in bottom_w and layout.metatile(x + 1, y + 1) == bottom_e:
+                found.append((x, y))
+    return found
+
 # The walls between two cabins with a passage in front of them, by the secondary tileset: (the left
 # column's last two cells, the right column's, the rows of their faces, each wall's pixel columns in
 # its cell). The InsideShip tileset's (the Abandoned Ship's cabins side by side): two thin walls,
@@ -358,6 +396,11 @@ def analyse(layout_id, taken=(), drop=()):
 
     behaviour = _behaviours(L)
     dynamic = dynamic_metatiles()
+    fronts = THING_FRONT.get(L.secondary, [])
+
+    def kind(x, y):
+        """The THING_FRONT entry a cell's metatile is of, or None."""
+        return next((i for i, (tiles, _, _) in enumerate(fronts) if meta(x, y) in tiles), None)
 
     def changes(m):
         return ((L.primary if m < 512 else L.secondary), m) in dynamic
@@ -404,6 +447,8 @@ def analyse(layout_id, taken=(), drop=()):
         return True
 
     notes = []
+    # a wall run may end on a cell an earlier room's lent piece stands in (FOOT_ON_LENT)
+    lent_foot = L.secondary in FOOT_ON_LENT
     walls = {}           # (ya, yb) -> list of columns
     wall_cells = set()
     for x in range(W):
@@ -417,7 +462,7 @@ def analyse(layout_id, taken=(), drop=()):
                 y += 1
             yb = y
             top_out = ya == 0 or void[ya - 1][x]
-            foot_floor = yb < H and floor[yb][x]
+            foot_floor = yb < H and (floor[yb][x] or (lent_foot and (x, yb) in taken))
             if top_out and foot_floor:
                 walls.setdefault((ya, yb), []).append(x)
                 wall_cells.update((x, yy) for yy in range(ya, yb))
@@ -485,6 +530,30 @@ def analyse(layout_id, taken=(), drop=()):
             wall_cells.difference_update((c, yy) for c in cols for yy in range(ya + wall_rows, yb))
             notes.append("the wall's %d rows: columns %s, rows %d-%d a thing's"
                          % (wall_rows, ",".join(map(str, sorted(cols))), ya + wall_rows, yb - 1))
+    # desks against a back wall (DESK): the wall over each stands to its top row; the desk and its chair
+    # are pieces of their own (desk_pieces), what the run held past them a thing (a bin)
+    hand_desks = [(dx, dy) for (dx, dy) in desks(L)
+                  if not {(dx, dy), (dx + 1, dy), (dx, dy + 1), (dx + 1, dy + 1)} & taken]
+    desk_cells = set()
+    for (dx, dy) in hand_desks:
+        desk_cells.update({(dx, dy), (dx + 1, dy), (dx, dy + 1), (dx + 1, dy + 1)})
+        for c in (dx, dx + 1):
+            for (ya, yb), cols in list(walls.items()):
+                if c in cols and ya < dy < yb:
+                    walls[(ya, yb)].remove(c)
+                    walls.setdefault((ya, dy), []).append(c)
+                    wall_cells.difference_update((c, yy) for yy in range(dy, yb))
+        notes.append("desk by hand: columns %d-%d, rows %d-%d" % (dx, dx + 1, dy, dy + 1))
+    # a table or a bin against a back wall (THING_FRONT): the wall over it stands to its row, it is a thing
+    for (ya, yb), cols in list(walls.items()):
+        for c in list(cols):
+            cut = next((y for y in range(ya + 1, yb) if kind(c, y) is not None), None)
+            if cut is not None:
+                walls[(ya, yb)].remove(c)
+                walls.setdefault((ya, cut), []).append(c)
+                wall_cells.difference_update((c, yy) for yy in range(cut, yb))
+                notes.append("column %d's wall stands to row %d, a %s before it"
+                             % (c, cut, "table" if kind(c, cut) == 0 else "bin"))
     # the walls between two cabins (DIVIDER): their columns' run is no wall's, their cells stay the
     # walls' (no thing of them); each stands as a partition (divider_pieces)
     dividers = []
@@ -522,19 +591,14 @@ def analyse(layout_id, taken=(), drop=()):
         notes.append("stairwell by hand: columns %d-%d, rows %d-%d" % (sx, sx + 2, sy, sy + 1))
 
     pieces = []
-    # things and edges: connected blocked cells that are not a wall's face; a thing of a known front
-    # (THING_FRONT) joins only cells of its own kind
-    fronts = THING_FRONT.get(L.secondary, [])
-
-    def kind(x, y):
-        return next((i for i, (tiles, _, _) in enumerate(fronts) if meta(x, y) in tiles), None)
-
+    # things and edges: connected blocked cells that are not a wall's face nor a desk's; a thing of a known
+    # front (THING_FRONT) joins only cells of its own kind
     seen = set()
     things = []
     alone = ALONE.get(layout_id, set())
     for y in range(H):
         for x in range(W):
-            if not solid[y][x] or (x, y) in wall_cells or (x, y) in seen:
+            if not solid[y][x] or (x, y) in wall_cells or (x, y) in seen or (x, y) in desk_cells:
                 continue
             comp, todo = [], [(x, y)]
             seen.add((x, y))
@@ -546,7 +610,7 @@ def analyse(layout_id, taken=(), drop=()):
                 for nx, ny in ((cx + 1, cy), (cx - 1, cy), (cx, cy + 1), (cx, cy - 1)):
                     if 0 <= nx < W and 0 <= ny < H and solid[ny][nx] and (nx, ny) not in wall_cells \
                             and (nx, ny) not in seen and (nx, ny) not in alone \
-                            and kind(nx, ny) == kind(cx, cy):
+                            and (nx, ny) not in desk_cells and kind(nx, ny) == kind(cx, cy):
                         seen.add((nx, ny))
                         todo.append((nx, ny))
             things.append(comp)
@@ -656,6 +720,26 @@ def analyse(layout_id, taken=(), drop=()):
                              leave=known[2] if known else ()))
         return out
 
+    def desk_pieces():
+        """The desks (DESK): the desk its front's rows tall on its legs' foot, its top run back to the wall,
+        a notch in its front where the chair is; the chair a card in front of it."""
+        out = []
+        cx0, cy0, cx1, cy1 = DESK_CHAIR
+        for (dx, dy) in hand_desks:
+            X, Y = dx * 16, dy * 16
+            foot = Y + 14 + DESK_FRONT
+            out.append(piece("desk_%d_%d" % (dx, dy),
+                             [(X, Y, X + 32, Y + cy0), (X, Y + cy0, X + cx0, foot), (X + cx1, Y + cy0, X + 32, foot)],
+                             DESK_FRONT, back=Y, solid=True, side=(X, foot - DESK_FRONT, X + 16, foot),
+                             leave=SHIP_CARPET))
+            out.append(piece("chair_%d_%d" % (dx, dy), [(X + cx0, Y + cy0, X + cx1, Y + cy1)], cy1 - cy0,
+                             leave=SHIP_CARPET, card=True))
+        # each room's own, as its berths are (own_shell): lent, a desk would leave the room it stood in
+        # without the wall it cut over it
+        for pc in out:
+            pc["alone"] = True
+        return out
+
     def divider_pieces():
         """The walls between two cabins (DIVIDER): each its pixel columns from the run's top to the
         passage, its drawn face's rows tall, dressed with that face; its cells' own drawing under
@@ -724,6 +808,7 @@ def analyse(layout_id, taken=(), drop=()):
     pieces += built
     pieces += stairwell_pieces(built)
     pieces += divider_pieces()
+    pieces += desk_pieces()
     # the room's sides where its floor reaches the map's edge
     back_foot = min((yb for (ya, yb) in walls), default=None)
     if back_foot is not None:

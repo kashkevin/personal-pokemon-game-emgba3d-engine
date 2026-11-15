@@ -613,7 +613,8 @@ class ShipCabinTests(unittest.TestCase):
     passage in front of them stood as one wall 48 rows tall, the outside's black its face."""
 
     ROOMS = ["LAYOUT_SS_TIDAL_ROOMS", "LAYOUT_ABANDONED_SHIP_ROOMS_1F", "LAYOUT_ABANDONED_SHIP_ROOMS_B1F",
-             "LAYOUT_ABANDONED_SHIP_ROOMS2_1F", "LAYOUT_ABANDONED_SHIP_ROOMS2_B1F"]
+             "LAYOUT_ABANDONED_SHIP_ROOMS2_1F", "LAYOUT_ABANDONED_SHIP_ROOMS2_B1F",
+             "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_ROOMS"]
 
     @classmethod
     def setUpClass(cls):
@@ -691,3 +692,79 @@ class ShipCabinTests(unittest.TestCase):
         # pixels on the berths' edges are the berths': the plain carpet laid under them showed there
         spec = bra.auto_room_spec("auto_abandoned_ship_rooms2_b1f", "LAYOUT_ABANDONED_SHIP_ROOMS2_B1F")
         self.assertEqual(spec["interior"]["under"], "own")
+
+
+class DeskTests(unittest.TestCase):
+    """The object audit's survey of 2026-11-15: the ship cabins' desks against the back wall (the InsideShip
+    tileset's, a chair pushed in) were read with the wall's columns as one run four rows deep and stood 48 rows
+    of it, the desk and the chair painted upright on the wall's face - a slab over the S.S. Tidal's cabins; the
+    tables and bins before the hidden floor's back walls the same. By hand (DESK): the wall over a desk stands
+    to its top row, the desk its front's rows with a notch where the chair is, the chair a card before it."""
+
+    ROOMS = {
+        "LAYOUT_SS_TIDAL_ROOMS": {(28, 2), (19, 11)},
+        "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_ROOMS": {(22, 2), (40, 2), (40, 10)},
+    }
+
+    @classmethod
+    def setUpClass(cls):
+        cls.read = {lid: bra.analyse(lid) for lid in cls.ROOMS}
+
+    def test_every_desk_in_the_auto_rooms_is_found(self):
+        import battle_room_specs
+        found = {lid: set(bra.desks(vb.LayoutArt(lid))) for lid in battle_room_specs.AUTO_ROOMS}
+        self.assertEqual({lid: spots for lid, spots in found.items() if spots}, self.ROOMS)
+
+    def test_each_is_a_desk_and_a_chair_before_the_wall(self):
+        cx0, cy0, cx1, cy1 = bra.DESK_CHAIR
+        for lid, spots in self.ROOMS.items():
+            ground, pieces, notes = self.read[lid]
+            names = {pc["name"]: pc for pc in pieces}
+            for (dx, dy) in spots:
+                X, Y = dx * 16, dy * 16
+                with self.subTest(room=lid, desk=(dx, dy)):
+                    desk, chair = names["desk_%d_%d" % (dx, dy)], names["chair_%d_%d" % (dx, dy)]
+                    self.assertEqual(desk["height"], bra.DESK_FRONT)
+                    self.assertEqual(max(y1 for (_, _, _, y1) in desk["shape"]), Y + 14 + bra.DESK_FRONT)
+                    self.assertEqual(desk["back"], Y)
+                    self.assertTrue(chair["card"])
+                    self.assertEqual(chair["shape"], [(X + cx0, Y + cy0, X + cx1, Y + cy1)])
+                    # the desk's notch is the chair's
+                    for (x0, y0, x1, y1) in desk["shape"]:
+                        self.assertFalse(x0 < X + cx1 and X + cx0 < x1 and y0 < Y + cy1 and Y + cy0 < y1)
+                    # the wall over its columns stands on its top row, no taller than the room's
+                    walls = [pc for pc in pieces if pc["name"].startswith("wall_")
+                             and pc["shape"][0][0] <= X and X + 32 <= pc["shape"][0][2]
+                             and pc["shape"][0][1] < Y <= pc["shape"][0][3]]
+                    self.assertEqual(len(walls), 1)
+                    self.assertEqual(walls[0]["foot"], Y)
+                    self.assertLessEqual(walls[0]["height"], 32)
+
+    def test_nothing_stands_taller_than_the_walls(self):
+        for lid in self.ROOMS:
+            ground, pieces, notes = self.read[lid]
+            with self.subTest(room=lid):
+                self.assertLessEqual(max(pc["height"] for pc in pieces), 32)
+
+    def test_a_wall_stands_over_a_lent_table_or_bin(self):
+        # the S.S. Tidal's tables and bins are lent to the hidden floor rooms: the cells they stand in are
+        # `taken`, and the wall over them stands to their row as over the room's own (FOOT_ON_LENT); before,
+        # the run's foot was no floor and the wall lay flat behind them
+        taken = {(1, 2), (18, 2), (19, 2), (18, 3), (19, 3), (20, 2), (7, 10)}
+        ground, pieces, notes = bra.analyse("LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_ROOMS", taken=taken)
+        walls = [pc["shape"][0] for pc in pieces if pc["name"].startswith("wall_")]
+        for (cx, cy) in ((1, 2), (18, 2), (19, 2), (20, 2), (7, 10)):
+            self.assertTrue(any(x0 <= cx * 16 < x1 and y1 == cy * 16 for (x0, y0, x1, y1) in walls), (cx, cy))
+        self.assertEqual(bra.FOOT_ON_LENT, {"gTileset_InsideShip"})
+
+    def test_the_tables_and_bins_before_a_back_wall_stand_on_their_own(self):
+        # the hidden floor's bins in the wall's shade (1, 2), (20, 2), (7, 10) and its table under the wall
+        # (18-19, 2-3); the S.S. Tidal's bin under its desk (28, 4)
+        ground, pieces, notes = self.read["LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_ROOMS"]
+        names = {pc["name"]: sorted((x0 // 16, y0 // 16) for (x0, y0, x1, y1) in pc["shape"]) for pc in pieces}
+        for (x, y) in ((1, 2), (20, 2), (7, 10)):
+            self.assertEqual(names["thing_%d_%d" % (x, y)], [(x, y)])
+        self.assertEqual(names["thing_18_2"], [(18, 2), (18, 3), (19, 2), (19, 3)])
+        ground, pieces, notes = self.read["LAYOUT_SS_TIDAL_ROOMS"]
+        names = {pc["name"]: sorted((x0 // 16, y0 // 16) for (x0, y0, x1, y1) in pc["shape"]) for pc in pieces}
+        self.assertEqual(names["thing_28_4"], [(28, 4)])
