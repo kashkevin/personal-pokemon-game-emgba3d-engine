@@ -1571,7 +1571,11 @@ def devon_lobby():
 
 BIKE_FLOOR = ("83948b", "acbdac", "cdcdcd", "d5ded5")
 BIKE_WALL = ("acac8b", "eeeede", "cdcdb4", "dedebd", "947b6a", "000000")
-BIKE_WALL_SIDE = (48, 4, 64, 32)
+# The faces the drawing never shows (the partition's, the south wall's ends, the east side wall):
+# the wall's two columns bare of the bike parts hung on it from its top band to its skirting. A
+# stretch of 16 (48-64) carried a wrench, repeated down every such face (the object audit of
+# 2026-11-14, class 3: the partition's side "stretched").
+BIKE_WALL_SIDE = (79, 4, 81, 32)
 
 
 def bike_shop():
