@@ -179,5 +179,49 @@ class TrickHousePuzzleWallTests(unittest.TestCase):
             self.assertEqual(list(own_pieces(layout_id)), ["wall"], layout_id)
 
 
+class PyramidLobbyTests(unittest.TestCase):
+    """The Battle Pyramid's lobby (the object audit's class 1): the back wall, the pillars, the statues on their
+    pedestals, the braziers and the little pyramids on its upper floor lay drawn on that floor. Cut by hand: the
+    statues, braziers and pyramids cards of their own pixels, the wall running on behind the statues."""
+
+    LAYOUT = "LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_LOBBY"
+
+    def test_each_card_is_its_own_pixels(self):
+        import furnished_room_specs as frs
+        L = vb.LayoutArt(self.LAYOUT)
+        pieces = own_pieces(self.LAYOUT)
+        cards = [pc for pc in pieces.values() if pc["card"]]
+        self.assertEqual(sorted(pc["name"] for pc in cards),
+                         sorted(["statue_3", "statue_5", "statue_9", "statue_11", "brazier_4", "brazier_10",
+                                 "pyramid_6", "pyramid_8"]))
+        for pc in cards:
+            with self.subTest(piece=pc["name"]):
+                self.assertTrue(pc["shape"])
+                for (x0, y0, x1, y1) in pc["shape"]:
+                    self.assertEqual(y1 - y0, 1)
+                    cy = y0 // 16
+                    a = L.cell_image(L.metatile(x0 // 16, cy)).convert("RGB").load()
+                    b = L.cell_image(frs.PYRAMID_PLAIN[cy]).convert("RGB").load()
+                    for x in range(x0, x1):
+                        self.assertNotEqual(a[x % 16, y0 % 16], b[x % 16, y0 % 16])
+        # a statue from the ears over the wall's second row to its pedestal's foot on the floor's row
+        statue = pieces["statue_3"]
+        self.assertEqual(min(y0 for (_, y0, _, _) in statue["shape"]), 24)
+        self.assertEqual(max(y1 for (_, _, _, y1) in statue["shape"]), 80)
+
+    def test_the_wall_stands_and_runs_on_behind_the_statues(self):
+        pieces = own_pieces(self.LAYOUT)
+        wall = pieces["wall"]
+        self.assertEqual((wall["shape"], wall["height"], wall["foot"]), ([(48, 0, 192, 64)], 64, 64))
+        self.assertEqual(wall["fill_down"], [(cx * 16, 16, cx * 16 + 16, 64) for cx in (3, 5, 9, 11)])
+        for name, x0 in (("block_pillar_w", 32), ("block_pillar_e", 192)):
+            pillar = pieces[name]
+            self.assertEqual((pillar["shape"], pillar["height"]), ([(x0, 0, x0 + 16, 96)], 64))
+        # nothing of the lobby's own floor below (the stairs down are rows 8-12) is the model's
+        for pc in pieces.values():
+            for (x0, y0, x1, y1) in pc["shape"]:
+                self.assertLessEqual(y1, 96, pc["name"])
+
+
 if __name__ == "__main__":
     unittest.main()

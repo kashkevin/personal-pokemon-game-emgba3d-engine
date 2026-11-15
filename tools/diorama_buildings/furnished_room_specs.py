@@ -1015,6 +1015,74 @@ def trick_house_puzzle_wall():
     facet, own_shell, piece = _helpers()
     return own_shell([piece("wall", [(0, 0, 240, 32)], 32, fill=16, foot=32, side=TRICK_HOUSE_WALL_SIDE)])
 
+
+# ── The Battle Pyramid's lobby (the Battle Frontier) ──────────────────────
+#
+# 15 x 18 cells, the BattlePyramid tileset. Its upper floor, rows 0-7, is a level over the lobby's
+# (the terrain raises it; the stairs down are rows 8-12), and everything standing on it lay drawn on
+# that floor (the object audit's class 1, pictured 2026-11-15): the back wall, the two pillars
+# flanking it, four statues on their pedestals before it, two braziers and two little pyramids
+# beside the warp. A model of these alone stands on the upper floor (a model stands on the ground
+# under its door: gl_building_renderer.c PlacementGround, its rectangle's bottom row the upper
+# floor's); the lobby's own furniture below stays the generic rules'.
+#
+#     rows 0-64    the back wall between the pillars (x 48-192): its frieze, its blocks, its foot on
+#                  row 4's top - 64 rows of face; either side of the pillars (x 0-32, 208-240) it is
+#                  a row lower, 48 rows, the outside over it and before it (row 4)
+#     rows 0-96    the pillars (x 32-48, 192-208): their capitals on rows 0-32, their shafts 32-96,
+#                  a box 64 rows tall before the wall
+#     rows 24-80   the statues (x 48-64, 80-96, 144-160, 176-192), two drawings, each on its pedestal
+#                  - cards, their own pixels (what differs from the plain wall and floor of their
+#                  rows); the wall behind them runs on from its pixels above (fill_down)
+#     rows 64-96   the braziers (x 64-80, 160-176) and the little pyramids (x 96-112, 128-144) beside
+#                  the warp: cards
+
+PYRAMID_LOBBY = "LAYOUT_BATTLE_FRONTIER_BATTLE_PYRAMID_LOBBY"
+PYRAMID_PLAIN = {1: 0x204, 2: 0x205, 3: 0x206, 4: 0x20B, 5: 0x20B}   # the plain wall's and floor's rows
+PYRAMID_WALL_SIDE = (64, 0, 80, 64)         # a plain stretch of the back wall, top to foot
+PYRAMID_STATUES = (3, 5, 9, 11)             # their columns, rows 1-4
+PYRAMID_CARDS = [("brazier_%d" % cx, cx, (4, 5)) for cx in (4, 10)] + \
+    [("pyramid_%d" % cx, cx, (4,)) for cx in (6, 8)]
+
+
+def drawn_apart(layout_id, cx, rows, plain):
+    """[(x0, y, x1, y + 1)]: the runs of a column of cells' pixels that differ from the plain metatile of
+    their row (`plain`: {row: metatile}) - a thing's own pixels where it is drawn over a wall or a floor
+    of the same colours."""
+    import voxel_building as vb
+    L = vb.LayoutArt(layout_id)
+    out = []
+    for cy in rows:
+        a = L.cell_image(L.metatile(cx, cy)).convert("RGB").load()
+        b = L.cell_image(plain[cy]).convert("RGB").load()
+        for j in range(16):
+            i = 0
+            while i < 16:
+                if a[i, j] == b[i, j]:
+                    i += 1
+                    continue
+                start = i
+                while i < 16 and a[i, j] != b[i, j]:
+                    i += 1
+                out.append((cx * 16 + start, cy * 16 + j, cx * 16 + i, cy * 16 + j + 1))
+    return out
+
+
+def pyramid_lobby():
+    facet, own_shell, piece = _helpers()
+    statues = [piece("statue_%d" % cx, drawn_apart(PYRAMID_LOBBY, cx, (1, 2, 3, 4), PYRAMID_PLAIN), 56,
+                     card=True) for cx in PYRAMID_STATUES]
+    cards = [piece(name, drawn_apart(PYRAMID_LOBBY, cx, rows, PYRAMID_PLAIN), 32, card=True)
+             for (name, cx, rows) in PYRAMID_CARDS]
+    return own_shell(statues + cards + [
+        piece("wall", [(48, 0, 192, 64)], 64, fill=16, foot=64, side=PYRAMID_WALL_SIDE,
+              fill_down=[(cx * 16, 16, cx * 16 + 16, 64) for cx in PYRAMID_STATUES]),
+        piece("wall_w", [(0, 16, 32, 64)], 48, fill=16, foot=64, side=(0, 16, 16, 64)),
+        piece("wall_e", [(208, 16, 240, 64)], 48, fill=16, foot=64, side=(224, 16, 240, 64)),
+        piece("block_pillar_w", [(32, 0, 48, 96)], 64, solid=True, side=(32, 32, 48, 96)),
+        piece("block_pillar_e", [(192, 0, 208, 96)], 64, solid=True, side=(192, 32, 208, 96)),
+    ])
+
 # ── The Pokemon League 1F (Ever Grande City) ───────────────────────────────
 #
 # 19 x 12 cells, the Pokemon Center's tiles in a wider room, with no model of its own until the object
@@ -2127,6 +2195,11 @@ def furnished_room_specs():
             "name": "trick_house_puzzle8",
             "interior": {"layout": "LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE8", "ground": [0x210],
                          "under": "own", "reuse_in": frozenset(), "pieces": trick_house_puzzle_wall()},
+        },
+        {
+            "name": "pyramid_lobby",
+            "interior": {"layout": PYRAMID_LOBBY, "ground": [0x20B],
+                         "reuse_in": frozenset(), "pieces": pyramid_lobby()},
         },
         {
             "name": "arena_lobby",
