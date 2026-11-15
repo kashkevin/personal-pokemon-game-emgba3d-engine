@@ -504,6 +504,20 @@ class BerthTests(unittest.TestCase):
         self.assertEqual(bin_["shape"], [(448, 208, 464, 224)])
         self.assertEqual(bin_["height"], 8)
 
+    def test_a_bin_on_the_shaded_carpet_leaves_it_to_the_floor(self):
+        # THING_FLOOR: the S.S. Tidal's three bins on the carpet in shade stand as bins, not red boxes;
+        # nothing else leaves the carpet (the tables' drawings have its colours in them)
+        tiles, colours = bra.THING_FLOOR["gTileset_InsideShip"]
+        ground, pieces, notes = self.read["LAYOUT_SS_TIDAL_ROOMS"]
+        leaving = {pc["name"] for pc in pieces if pc.get("leave")}
+        self.assertEqual(leaving, {"edge_10_5", "edge_16_13", "edge_28_13"})
+        for pc in pieces:
+            if pc["name"] in leaving:
+                self.assertEqual(tuple(pc["leave"]), colours, pc["name"])
+        for lid in self.ROOMS:
+            if lid != "LAYOUT_SS_TIDAL_ROOMS":
+                self.assertFalse([pc["name"] for pc in self.read[lid][1] if pc.get("leave")], lid)
+
 
 class TrickHouseWallTests(unittest.TestCase):
     """The object audit of 2026-11-14 (class 5): the Trick House's puzzle rooms draw their back wall on two rows;

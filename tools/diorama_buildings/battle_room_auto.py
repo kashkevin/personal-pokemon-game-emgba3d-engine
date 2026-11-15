@@ -119,6 +119,18 @@ WALL_ROWS = {
 # instead showed 15 grey pixels at 45 degrees.
 UNDER_OWN = {"LAYOUT_ROUTE110_TRICK_HOUSE_PUZZLE1"}
 
+# Things drawn on a floor of another colour that leave it to the floor round them, by the secondary
+# tileset: {metatiles: the floor's colours}. The InsideShip tileset's bin on the carpet in shade (beside
+# a berth, against a cabin's side): a thing claims its cells' pixels that are not the room's floor, and
+# the shaded carpet is another colour, so the bin stood as a block of carpet the cell wide with the bin
+# painted on its top and front - two bins on a red box - where the bin on the plain carpet stood as
+# itself (the object audit's survey of 2026-11-15). Only the bins' cells: the tables' drawings have the
+# carpet's colours in them too, and left to the floor they striped the tables' tops red.
+THING_FLOOR = {
+    # the carpet and its dots, and in shade
+    "gTileset_InsideShip": ({0x235, 0x268, 0x277}, ("de7b52", "dea462", "bd5a41", "bd7341")),
+}
+
 # Ship berths modelled by hand, by their metatiles (the secondary tileset's): the InsideShip tileset's
 # bed in its alcove, two cells by two under the back wall, its side board on the west or (the
 # second) the east - the S.S. Tidal's cabins and the Abandoned Ship's. The reader took the berth's
@@ -537,6 +549,12 @@ def analyse(layout_id, taken=(), drop=()):
                 out.append(cur)
         return [[(x, y) for x in cols for y in range(ya, yb)] for (ya, yb), cols in out]
 
+    def floor_left(comp):
+        """The floor's colours a thing leaves round it (THING_FLOOR): only where all its cells are
+        the listed metatiles."""
+        tiles, colours = THING_FLOOR.get(L.secondary, ((), ()))
+        return colours if all(meta(cx, cy) in tiles for (cx, cy) in comp) else ()
+
     def thing_pieces():
         out = []
         for k, comp in enumerate(part for whole in things for part in one_foot(whole)):
@@ -570,7 +588,8 @@ def analyse(layout_id, taken=(), drop=()):
                 tall = max(8, min(THING, drawn - 8))
                 name = "thing_%d_%d" % (comp[0][0], comp[0][1])
             out.append(piece(name, rects, tall, back=top if drawn - tall < foot - top else None,
-                             solid=True, side=(x0, foot - min(tall, 16), x0 + 16, foot)))
+                             solid=True, side=(x0, foot - min(tall, 16), x0 + 16, foot),
+                             leave=floor_left(comp)))
         return out
 
     def stairwell_pieces(walls_built):
