@@ -54,9 +54,8 @@ DARK = 40           # a pixel at most this bright is the black outside a room
 # The Sootopolis Gym 1F's two ice rocks at the foot of an ice ledge (0x216, the rock on the ice's
 # highlight) were read with the ledge's column as one piece, the ledge standing a row out with the
 # rock drawn up its face, where the room's six rocks on the open ice stand alone (KNOWN_ISSUES
-# MS-227). Its two rocks behind a ledge (11, 9 and 9, 19) are not here: standing alone they would
-# have no front on the floor and lie flat behind the ledge's 20 rows, hidden; as one piece with
-# the ledge they lie on its top.
+# MS-227). Its two rocks behind a ledge, on its edge (11, 9 and 9, 19), stand alone as the rocks'
+# kind (THING_FRONT): as one piece with the ledge they lay on its top, bent over the drop.
 ALONE = {
     "LAYOUT_SOOTOPOLIS_CITY_GYM_1F": {(5, 6), (7, 17)},
 }
@@ -165,6 +164,14 @@ THING_FRONT = {
     "gTileset_InsideShip": [
         ({0x256, 0x257, 0x25E, 0x25F, 0x270, 0x278, 0x20F, 0x217}, 8, SHIP_CARPET),
         ({0x262, 0x235, 0x268, 0x277}, 8, SHIP_CARPET),
+    ],
+    # The Sootopolis Gym's ice rocks (0x203; 0x216 on the ice's highlight), each its own cell, 8 rows tall as the
+    # room's rocks on the open ice stood. Two lie at the back of an upper floor, on the ledge's edge (1F 11, 9 and
+    # 9, 19): read with the ledge's column below them as one thing, the rock was laid back as the ledge's top - bent
+    # over the drop from the 3D cameras (the object audit's class 5). Of their own kind, they stand by themselves
+    # behind the ledge, as drawn.
+    "gTileset_SootopolisGym": [
+        ({0x203, 0x216}, 8, ()),
     ],
 }
 

@@ -126,17 +126,22 @@ class FloorShadeTests(unittest.TestCase):
                 self.assertEqual(pc["height"], 8)
 
     def test_the_sootopolis_gyms_rocks_stand_alike(self):
-        # its ten ice rocks (0x203, and 0x216 on the ice's highlight): eight stand on the floor
-        # alone, the two at the foot of a ledge (ALONE) too; the two behind a ledge (11, 9 and
-        # 9, 19) lie on its top, where its 20 rows would hide a rock standing behind it
+        # its ten ice rocks (0x203, and 0x216 on the ice's highlight) each stand alone, 8 rows: the
+        # two at the foot of a ledge (ALONE) and the two behind a ledge, on its edge (11, 9 and 9, 19),
+        # too - read with the ledge's column as one thing, those lay back as its top, bent over the
+        # drop from the 3D cameras (the object audit's class 5; THING_FRONT); the ledge stands without
+        # them
         things = self.things("LAYOUT_SOOTOPOLIS_CITY_GYM_1F")
         L = vb.LayoutArt("LAYOUT_SOOTOPOLIS_CITY_GYM_1F")
         rocks = [(x, y) for y in range(L.h) for x in range(L.w)
                  if L.blocks[y * L.w + x] & 0x3FF in (0x203, 0x216)]
         self.assertEqual(len(rocks), 10)
+        owner = {cell: name for name, pc in things.items() for cell in self.cells(pc)}
+        for x, y in ((11, 9), (9, 19)):
+            ledge = things[owner[(x, y + 1)]]
+            self.assertNotIn((x, y), self.cells(ledge))
+            self.assertEqual(ledge["height"], 20)
         for x, y in rocks:
-            if (x, y) in ((11, 9), (9, 19)):
-                continue
             pc = things["thing_%d_%d" % (x, y)]
             with self.subTest(rock=(x, y)):
                 self.assertEqual(self.cells(pc), [(x, y)])
