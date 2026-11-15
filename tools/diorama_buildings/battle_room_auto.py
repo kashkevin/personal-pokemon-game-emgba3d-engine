@@ -199,6 +199,16 @@ DESK = {
 DESK_FRONT = 10                 # rows of the desk's front: its apron and legs, rows 14-23
 DESK_CHAIR = (10, 17, 23, 32)   # the chair in the desk's two cells: x0, y0, x1, y1
 
+# Chairs on a cabin's carpet, by the secondary tileset: the InsideShip tileset's two, their backs west
+# and east of their seats, beside the cabins' tables. They are walkable, and the 2D game draws them over
+# the player who steps on to one (their metatiles' top layer is `covered`); they lay flat (the object
+# audit's class 2). Each stands as a card of its own pixels on its cell's foot, as the desks' chairs in
+# the same rooms (DESK_CHAIR): the player stepping on to one stands behind it, as in the 2D game. The
+# carpet under it is its cell's own lower layer. Each room's own (`alone`).
+SEATS = {
+    "gTileset_InsideShip": {0x260, 0x261},
+}
+
 
 def desks(layout):
     """[(x, y)] of the desks (DESK) a layout has, by their top row's west cell."""
@@ -740,6 +750,19 @@ def analyse(layout_id, taken=(), drop=()):
             pc["alone"] = True
         return out
 
+    def seat_pieces():
+        """The chairs on the carpet (SEATS): each a card of its cell's own pixels."""
+        out = []
+        seats = SEATS.get(L.secondary, ())
+        for y in range(H):
+            for x in range(W):
+                if meta(x, y) in seats and (x, y) not in taken:
+                    pc = piece("seat_%d_%d" % (x, y), [(x * 16, y * 16, x * 16 + 16, y * 16 + 16)], 16,
+                               leave=SHIP_CARPET, card=True)
+                    pc["alone"] = True
+                    out.append(pc)
+        return out
+
     def divider_pieces():
         """The walls between two cabins (DIVIDER): each its pixel columns from the run's top to the
         passage, its drawn face's rows tall, dressed with that face; its cells' own drawing under
@@ -802,6 +825,8 @@ def analyse(layout_id, taken=(), drop=()):
                              solid=True, foot=foot, side=(X, foot - 16, X + 16, foot)))
         return out
 
+    # the chairs first: a thing's drawn top reaching up into a chair's cell claims none of it
+    pieces += seat_pieces()
     pieces += thing_pieces()
     pieces += berth_pieces()
     built = wall_pieces()

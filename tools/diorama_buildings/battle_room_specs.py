@@ -255,6 +255,9 @@ AUTO_ROOMS = [
     # the hidden floor's six cabins: proved once the desks against their back walls stood by hand (DESK)
     # and the tables and bins there before the wall (THING_FRONT)
     "LAYOUT_ABANDONED_SHIP_HIDDEN_FLOOR_ROOMS",
+    # the cabin of the Abandoned Ship's B1F that a map of its own leads to: no model - its back wall
+    # lay flat, its bin stood lent from the S.S. Tidal (found with the ship chairs, 2026-11-15)
+    "LAYOUT_ABANDONED_SHIP_ROOM_B1F",
     "LAYOUT_MOSSDEEP_CITY_SPACE_CENTER_2F",
     # proved with its sand ridges' cross pieces left out (AUTO_DROP): the back wall and the
     # long ridges running from it stand

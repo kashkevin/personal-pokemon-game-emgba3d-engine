@@ -694,6 +694,57 @@ class ShipCabinTests(unittest.TestCase):
         self.assertEqual(spec["interior"]["under"], "own")
 
 
+class SeatTests(unittest.TestCase):
+    """The object audit's class 2: the ship cabins' chairs (the InsideShip tileset's two) are walkable, and
+    the 2D game draws them over the player who steps on to one (their top layer covered); they lay flat.
+    Each stands as a card of its cell's own pixels, as the desks' chairs, each room's own."""
+
+    def test_the_chairs_are_walkable_and_drawn_over_the_player(self):
+        import struct
+        path = os.path.join(vb.ROOT, "data", "tilesets", "secondary", "inside_ship", "metatile_attributes.bin")
+        with open(path, "rb") as f:
+            data = f.read()
+        attrs = struct.unpack("<%dH" % (len(data) // 2), data)
+        for m in bra.SEATS["gTileset_InsideShip"]:
+            self.assertEqual((attrs[m - 0x200] >> 12) & 0xF, 1, hex(m))     # covered
+        import battle_room_specs
+        for lid in battle_room_specs.AUTO_ROOMS:
+            L = vb.LayoutArt(lid)
+            for y in range(L.h):
+                for x in range(L.w):
+                    if L.metatile(x, y) in bra.SEATS.get(L.secondary, ()):
+                        self.assertEqual((L.blocks[y * L.w + x] >> 10) & 3, 0, (lid, x, y))
+
+    def test_every_chair_in_the_auto_rooms_is_a_card_of_its_cell(self):
+        import battle_room_specs
+        rooms = 0
+        for lid in battle_room_specs.AUTO_ROOMS:
+            L = vb.LayoutArt(lid)
+            want = {(x, y) for y in range(L.h) for x in range(L.w)
+                    if L.metatile(x, y) in bra.SEATS.get(L.secondary, ())}
+            if not want:
+                continue
+            rooms += 1
+            with self.subTest(room=lid):
+                ground, pieces, notes = bra.analyse(lid)
+                seats = [pc for pc in pieces if pc["name"].startswith("seat_")]
+                self.assertEqual({(pc["shape"][0][0] // 16, pc["shape"][0][1] // 16) for pc in seats}, want)
+                for pc in seats:
+                    [(x0, y0, x1, y1)] = pc["shape"]
+                    self.assertEqual((x1 - x0, y1 - y0), (16, 16))
+                    self.assertTrue(pc["card"] and pc["alone"], pc["name"])
+        # the S.S. Tidal's cabins and the Abandoned Ship's six rooms of them
+        self.assertEqual(rooms, 7)
+
+    def test_the_abandoned_ships_b1f_cabin_is_read_off_its_cells(self):
+        import battle_room_specs
+        self.assertIn("LAYOUT_ABANDONED_SHIP_ROOM_B1F", battle_room_specs.AUTO_ROOMS)
+        ground, pieces, notes = bra.analyse("LAYOUT_ABANDONED_SHIP_ROOM_B1F")
+        names = {pc["name"]: pc for pc in pieces}
+        self.assertEqual(names["wall_1_0"]["shape"], [(16, 0, 128, 32)])
+        self.assertEqual(sorted(n for n in names if n.startswith("seat_")), ["seat_2_4", "seat_3_3", "seat_6_5"])
+
+
 class DeskTests(unittest.TestCase):
     """The object audit's survey of 2026-11-15: the ship cabins' desks against the back wall (the InsideShip
     tileset's, a chair pushed in) were read with the wall's columns as one run four rows deep and stood 48 rows
