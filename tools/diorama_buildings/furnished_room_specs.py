@@ -1083,6 +1083,69 @@ def pyramid_lobby():
         piece("block_pillar_e", [(192, 0, 208, 96)], 64, solid=True, side=(192, 32, 208, 96)),
     ])
 
+
+# ── Trainer Hill's floors 1F-4F ────────────────────────────────────────────
+#
+# 16 x 21 cells. The game lays each floor out at run time (trainer_hill.c
+# GenerateTrainerHillFloorLayout): the first five rows are the layout's own, the same on every
+# floor but for the floor's number in the middle panel's lights (cell 7,4), and the sixteen rows
+# under them the challenge's maze, whose white blocks and blue posts stand as props (props.c
+# sTrainerHill). The five rows had no model and lay drawn on the floor (the object audit's class 1,
+# pictured 2026-11-15):
+#
+#     rows 0-32    the back wall of the two alcoves (x 0-64, 176-240), its foot row 32, each with a
+#                  doorway (x 31-49, its arch from row 13, its dark from row 16) on to the stairs -
+#                  down in the west one, up in the east one - their flights drawn in its dark
+#     rows 0-80    the block between the alcoves (x 64-176): its face rows 48-80 on its foot row
+#                  80, the same wall as theirs; seen from above, rows 0-48, the tops of its sides
+#                  (white, 8 pixels: x 64-72, 168-176) running back to the alcoves' wall and the
+#                  outside black between them
+#     rows 48-96   the panel before its face (x 96-144) with the floor's number in its lights: a
+#                  box a cell deep, its slatted top rows 48-64 flush with the wall's top, its face
+#                  rows 64-96. Its foot row (row 5) is the maze's first: the challenge draws it with
+#                  a block's white top over the panel's last 3 rows where a block stands before it
+#                  (metatiles 0x21B-0x21D for 0x213-0x215), so the panel does not answer for that
+#                  row (`free`): the block stands before it as its prop, and the panel keeps its
+#                  own drawn foot
+#
+# x 240-256 is the outside on every row of every floor. Collision, warps and events are untouched.
+
+TRAINER_HILL_FLOORS = ["LAYOUT_TRAINER_HILL_%dF" % n for n in (1, 2, 3, 4)]
+HILL_WALL_SIDE = (0, 0, 16, 32)               # a plain panel of the alcoves' wall, band to foot
+HILL_DOOR_DARK = (32, 16, 48, 26)             # a doorway's dark, between its arch and its flight
+HILL_PANEL_SIDE = (126, 64, 142, 96)          # the panel's face beside its lights: louvres, base
+
+
+def hill_doorway_wall(name, x0, x1, door_x, door):
+    """An alcove's back wall, x0..x1 on its foot row 32, with the doorway at door_x..door_x + 18 cut
+    out under its arch (its corners stepping in over rows 13-16), and the doorway's recess behind it
+    in its dark, back to row 16 where the arch's corners end: run back to row 13, under the lintel's
+    middle, the recess's floor behind the corners - the outside's black and the corners' own drawing
+    laid flat - showed through the doorway from the game's camera. `door`: the doorway's cell (its
+    warp), which the wall does not answer for."""
+    facet, own_shell, piece = _helpers()
+    import voxel_building_specs as v
+    d0, d1 = door_x, door_x + 18
+    arch = [(d0, 13, d0 + 3, 14), (d1 - 3, 13, d1, 14), (d0, 14, d0 + 2, 15), (d1 - 2, 14, d1, 15),
+            (d0, 15, d0 + 1, 16), (d1 - 1, 15, d1, 16)]
+    return [
+        v.stairwell("stairwell_" + name, d0, d1, 32, 16, 19, HILL_DOOR_DARK, 0),
+        piece("wall_" + name, [(x0, 0, d0, 32), (d0, 0, d1, 13)] + arch + [(d1, 0, x1, 32)], 32,
+              fill=16, foot=32, side=HILL_WALL_SIDE, free=[door]),
+    ]
+
+
+def trainer_hill_floor():
+    facet, own_shell, piece = _helpers()
+    return own_shell([
+        piece("block_panel", [(96, 48, 144, 96)], 32, solid=True, foot=96, side=HILL_PANEL_SIDE,
+              free=[(6, 5), (7, 5), (8, 5)]),
+    ] + hill_doorway_wall("w", 0, 64, 31, (2, 1)) + hill_doorway_wall("e", 176, 240, 191, (12, 1)) + [
+        # a box (`solid`): its sides, from the alcoves, are the alcoves' wall - not its top's outline
+        # drawn along them
+        piece("block_mid", [(64, 0, 176, 80)], 32, fill=16, foot=80, side=HILL_WALL_SIDE, solid=True),
+    ])
+
 # ── The Pokemon League 1F (Ever Grande City) ───────────────────────────────
 #
 # 19 x 12 cells, the Pokemon Center's tiles in a wider room, with no model of its own until the object
@@ -2204,6 +2267,13 @@ def furnished_room_specs():
             "interior": {"layout": PYRAMID_LOBBY, "ground": [0x20B],
                          "reuse_in": frozenset(), "pieces": pyramid_lobby()},
         },
+    ] + [
+        {
+            "name": "trainer_hill_%s" % layout.rsplit("_", 1)[1].lower(),
+            "interior": {"layout": layout, "ground": [0x23B], "under": "own",
+                         "reuse_in": frozenset(), "pieces": trainer_hill_floor()},
+        } for layout in TRAINER_HILL_FLOORS
+    ] + [
         {
             "name": "arena_lobby",
             "interior": {"layout": "LAYOUT_BATTLE_FRONTIER_BATTLE_ARENA_LOBBY", "ground": [0x201],

@@ -240,5 +240,75 @@ class DevonLobbyStripTests(unittest.TestCase):
             self.assertFalse(pieces[name]["own_floor"], name)
 
 
+class TrainerHillFloorTests(unittest.TestCase):
+    """Trainer Hill's floors 1F-4F (the object audit's class 1): their first five rows - the alcoves' back wall
+    with the stairs' doorways, the block between them and the panel with the floor's number - are the layout's
+    own on every challenge and had no model; cut by hand. The rows under them are the challenge's maze."""
+
+    FLOORS = ["LAYOUT_TRAINER_HILL_%dF" % n for n in (1, 2, 3, 4)]
+
+    def test_the_five_rows_are_every_floors_but_for_the_number(self):
+        arts = [vb.LayoutArt(lid) for lid in self.FLOORS]
+        for cy in range(5):
+            for cx in range(16):
+                ids = {L.metatile(cx, cy) for L in arts}
+                if (cx, cy) == (7, 4):
+                    self.assertEqual(len(ids), 4)
+                else:
+                    self.assertEqual(len(ids), 1, (cx, cy))
+
+    def test_the_walls_doorways_block_and_panel(self):
+        for lid in self.FLOORS:
+            with self.subTest(floor=lid):
+                pieces = own_pieces(lid)
+                self.assertEqual(sorted(pieces), ["block_mid", "block_panel", "stairwell_e", "stairwell_w",
+                                                  "wall_e", "wall_w"])
+                for side, x0, door in (("w", 31, (2, 1)), ("e", 191, (12, 1))):
+                    wall = pieces["wall_" + side]
+                    self.assertEqual((wall["height"], wall["foot"], wall["free"]), (32, 32, [door]))
+                    # the doorway's dark, rows 16-32, is the recess's, not the wall's
+                    for (a, b, c, d) in wall["shape"]:
+                        self.assertFalse(a < x0 + 18 and c > x0 and d > 16, (side, (a, b, c, d)))
+                    # its recess back to where the arch's corners end
+                    self.assertEqual(pieces["stairwell_" + side]["inside"], (x0, 16, x0 + 18, 32))
+                mid = pieces["block_mid"]
+                self.assertEqual((mid["shape"], mid["height"], mid["foot"]), ([(64, 0, 176, 80)], 32, 80))
+                self.assertTrue(mid["solid"])
+                self.assertEqual(mid["side"], (0, 0, 16, 32))
+                panel = pieces["block_panel"]
+                self.assertEqual((panel["shape"], panel["height"], panel["foot"]), ([(96, 48, 144, 96)], 32, 96))
+                self.assertEqual(panel["free"], [(6, 5), (7, 5), (8, 5)])
+                # nothing of the maze, rows 5 on, but the panel's foot
+                for pc in pieces.values():
+                    for (a, b, c, d) in pc["shape"]:
+                        self.assertLessEqual(d, 96 if pc is panel else 80, pc["name"])
+
+    def test_the_maze_draws_the_panels_foot_its_own_way(self):
+        """The challenges' mazes draw the panel's foot row with a block's white top over its last 3 pixel
+        rows where a block stands before it: the panel does not answer for that row."""
+        import glob
+        import os
+        L = vb.LayoutArt(self.FLOORS[0])
+        own = [L.metatile(cx, 5) for cx in (6, 7, 8)]
+        self.assertEqual(own, [0x213, 0x214, 0x215])
+        maps = sorted(glob.glob(os.path.join(vb.ROOT, "graphics", "trainer_hill", "maps_*", "floor_*",
+                                             "metatiles.bin")))
+        self.assertEqual(len(maps), 18)
+        seen = set()
+        for path in maps:
+            with open(path, "rb") as f:
+                row = f.read(16)
+            for k, cx in enumerate((6, 7, 8)):
+                m = 0x200 + row[cx]
+                seen.add(m)
+                self.assertIn(m, (own[k], own[k] + 8), path)
+        self.assertEqual(seen, {0x213, 0x214, 0x215, 0x21B, 0x21C, 0x21D})
+        for m in own:
+            a = L.cell_image(m).convert("RGB").load()
+            b = L.cell_image(m + 8).convert("RGB").load()
+            rows = {j for j in range(16) for i in range(16) if a[i, j] != b[i, j]}
+            self.assertEqual(rows, {13, 14, 15})
+
+
 if __name__ == "__main__":
     unittest.main()
