@@ -397,5 +397,88 @@ class TrainerHillEntranceTests(unittest.TestCase):
                     self.assertNotEqual((L.blocks[cy * L.w + cx] >> 10) & 3, 0, (name, cx, cy))
 
 
+class TrainerHillRoofTests(unittest.TestCase):
+    """Trainer Hill's roof (the object audit's class 1): its tower, back parapet, posts and lamps lay drawn on the floor;
+    cut by hand. The tower's faces are slanted planes on their drawn feet - a wall standing column by column on them
+    showed its steps as a grille from the 3D cameras - and nothing of it is made up past the drawing's top."""
+
+    LAYOUT = "LAYOUT_TRAINER_HILL_ROOF"
+
+    def drawing(self):
+        L = vb.LayoutArt(self.LAYOUT)
+        from PIL import Image
+        full = Image.new("RGB", (L.w * 16, L.h * 16))
+        for cy in range(L.h):
+            for cx in range(L.w):
+                full.paste(L.cell_image(L.metatile(cx, cy)).convert("RGB"), (cx * 16, cy * 16))
+        return L, full.load(), L.cell_image(0x36b).convert("RGB").load()
+
+    def test_the_towers_feet_are_two_straight_lines_and_its_front(self):
+        """Each tower column's drawing runs from the top down to its foot, the first pixel of the roof's floor: a
+        row every two columns from (112, 69) to (195, 111), the front's 111 to x 204, mirrored back to (287, 69) -
+        but where the doorways' bays stand out to row 96."""
+        L, px, fl = self.drawing()
+        for x in range(112, 288):
+            y = 0
+            while px[x, y] != fl[x % 16, y % 16]:
+                y += 1
+            if 136 <= x < 167 or 233 <= x < 264:
+                want = 96
+            elif x < 196:
+                want = 69 + (x - 112 + 1) // 2
+            elif x < 205:
+                want = 111
+            else:
+                want = 110 - (x - 205) // 2
+            self.assertEqual(y, want, x)
+
+    def test_the_pieces(self):
+        pieces = own_pieces(self.LAYOUT)
+        posts = [n for n in pieces if n.startswith("post_")]
+        self.assertEqual(len(posts), 19)
+        for name in posts:
+            pc = pieces[name]
+            cy = int(name.rsplit("_", 1)[1])
+            self.assertTrue(pc["card"], name)
+            # standing on its cell's row 14, its cap on the cell north's last four rows
+            self.assertEqual(pc["foot"], cy * 16 + 14, name)
+            self.assertEqual(min(b for (_, b, _, _) in pc["shape"]), cy * 16 - 4, name)
+        for cx in (0, 2, 22, 24):
+            self.assertTrue(pieces["lamp_%d" % cx]["card"])
+        w, e = pieces["wall_tower_w"], pieces["wall_tower_e"]
+        self.assertEqual(w["facet"], ((112, 37, 68), (196, 79, 110)))
+        self.assertEqual(e["facet"], ((205, 78.5, 109.5), (288, 37, 68)))
+        for pc in (w, e, pieces["wall_tower_front"]):
+            self.assertEqual((pc["height"], pc["fill"]), (32, 16), pc["name"])
+        # the side walls from the faces back to where the roof begins (Z 32)
+        self.assertEqual(w["walls"], [((112, 32), (112, 69))])
+        self.assertEqual(e["walls"], [((288, 69), (288, 32))])
+        # the bays: 24 rows to row 96, their tops laid back to their face's plane, not past it
+        for name, x0, x1 in (("block_bay_w", 136, 166), ("block_bay_e", 234, 264)):
+            bay = pieces[name]
+            self.assertEqual((bay["height"], bay["foot"]), (24, 96), name)
+            self.assertEqual([a for (a, _, _, _) in bay["shape"]], list(range(x0, x1)), name)
+        # the roof laid over the walls at their height, each column down to its eave (32 rows over its foot)
+        roof = pieces["block_tower_roof"]
+        self.assertEqual((roof["base"], roof["height"], roof["each_foot"]), (31, 1, True))
+        self.assertEqual(dict((a, d) for (a, _, _, d) in roof["shape"])[150], 88 - 32)
+        # the back parapet after the posts (their first caps are drawn on its face)
+        names = list(pieces)
+        for side in ("w", "e"):
+            par = pieces["wall_parapet_" + side]
+            self.assertEqual((par["height"], par["foot"], par["fill"]), (16, 64, 16))
+            self.assertGreater(names.index("wall_parapet_" + side), names.index("post_18_4"))
+
+    def test_the_doors_are_in_the_towers_faces(self):
+        """The stairs' warp (9, 5) and the lift's (15, 5) lie in the tower's faces' columns: walked into, painted on
+        them; the lift's door is the one the game animates (0x383), on the screen's tiles, not the map's cells."""
+        L = vb.LayoutArt(self.LAYOUT)
+        self.assertEqual(L.metatile(15, 5), 0x383)
+        bays = own_pieces(self.LAYOUT)
+        for (cx, cy), bay in (((9, 5), "block_bay_w"), ((15, 5), "block_bay_e")):
+            cols = [a for (a, _, _, _) in bays[bay]["shape"]]
+            self.assertTrue(min(cols) <= cx * 16 and cx * 16 + 15 < max(cols) + 2, (cx, bay))
+
+
 if __name__ == "__main__":
     unittest.main()

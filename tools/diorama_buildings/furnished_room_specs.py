@@ -1157,8 +1157,8 @@ def trainer_hill_floor():
 #                   arch and dark as the floors' doorways), its foot row 32
 #     rows 0-144    the corridor's sides (x 104-112, 192-200): seen from above, their white tops run from the
 #                   corridor's back wall to the lobby's, where their faces are the lobby wall's ends
-#     rows 112-144  the lobby's back wall either side (its band, panels and teal skirting; the monitor and a blue
-#                   double door painted on it), its foot row 144; the white panel at its west end runs on to row 150
+#     rows 112-144  the lobby's back wall either side (its band, panels and teal skirting; the monitor and the
+#                   lift's door painted on it), its foot row 144; the white panel at its west end runs on to row 150
 #     rows 60-79    the corridor's two counters, their fronts rows 71-79 over the side lanes, the long arms
 #                   from them down the corridor (x 128-144, x 160-176) to the lobby's counters
 #     rows 124-175  the lobby's two counters: a bar along row 10 (its top from row 156, its front rows 167-175)
@@ -1280,6 +1280,114 @@ def trainer_hill_entrance():
         piece("side_w", [], 32, side=TH_LOBBY_SIDE, walls=[((0, 272), (0, 150))]),
         piece("side_e", [], 32, side=TH_LOBBY_SIDE, walls=[((304, 144), (304, 272))]),
     ])
+
+# ── Trainer Hill's roof ─────────────────────────────────────────────────────
+#
+# 25 x 16 cells. The building's roof, open to the sky (the object audit's class 1: it had no model, its
+# posts and lamps lying drawn on the floor). From the top of the drawing:
+#
+#     rows 0-111    the tower over the stairs and the lift (x 112-287): its two faces 32 rows tall, their feet
+#                   on the slant from its sides (row 69) to its front (row 111), its drawn roof over them running
+#                   off the drawing's top; the stairs' doorway (x 136-166) and the lift's door (x 233-263) in
+#                   bays standing out to a straight front (row 96); the roof's back parapet either side of it,
+#                   its white coping (rows 40-47) over its teal face (rows 48-63), what lies beyond it over that
+#     rows 60-158   two lines of posts down the sides of the way to the tower (x 101-108 and 293-300): a post a
+#                   cell, its foot on the cell's floor (rows 0-13), its cap on the cell north's (rows 12-15,
+#                   drawn over the post before it); the cell's floor the roof's (0x36b) round them
+#     rows 172-190  seven posts along the roof's front edge (x 149-252), the edge's white sill drawn over the
+#                   two at its ends
+#     rows 104-127  four lamps in the corners outside the posts (x 6-14, 38-46, 358-366, 390-398), on their
+#                   cells' upper layer
+#     rows 155-256  the roof's front edge and the building's face below it, seen from above: the drawing's
+#
+# The tower stands as a building's walls do, its slanted faces planes on their drawn feet, its drawn roof laid
+# back as its top at the walls' height - nothing of it the drawing does not show (its apex is off the drawing:
+# none is made up); the back parapet stands; the posts and the lamps stand as cards of their own pixels; the front
+# edge and the building's face under it lie as drawn (the face drops from the roof's floor: nothing stands there).
+# The doors' animation draws the screen's tiles, not the map's cells: the tower answers for its doors' cells.
+# Collision, warps and events are untouched.
+
+TH_ROOF = "LAYOUT_TRAINER_HILL_ROOF"
+TH_ROOF_FLOOR = 0x36b                       # the roof's floor, an 8-pixel grid
+TH_TOWER_SIDE = (118, 50, 134, 72)          # the tower's west face, plain teal under its roof
+TH_PARAPET_SIDE = (16, 40, 32, 64)          # the back parapet: its white coping over its teal face
+
+
+def lower_apart(layout_id, cells, floor, box=None):
+    """[(x0, y, x1, y + 1)]: the runs of `cells`' pixels drawn on their lower layer where it differs from `floor`'s
+    drawing (a metatile) and the upper layer draws nothing over it - a post on the roof's floor, not the next
+    post's cap drawn over its foot - within `box` (x0, y0, x1, y1); a gap of a pixel or two in a row between the
+    thing's pixels is the thing's too (a post's highlight in the floor's own colour at the same place)."""
+    import voxel_building as vb
+    L = vb.LayoutArt(layout_id)
+    f = L.cell_image(floor).convert("RGBA").load()
+    out = []
+    for (cx, cy) in cells:
+        m = L.metatile(cx, cy)
+        a = L.cell_image(m).convert("RGBA").load()
+        b = L.cell_image(m, layers=(0,)).convert("RGBA").load()
+        for j in range(16):
+            y = cy * 16 + j
+            if box is not None and not box[1] <= y < box[3]:
+                continue
+            xs = [i for i in range(16) if b[i, j] != f[i, j] and a[i, j] == b[i, j]
+                  and (box is None or box[0] <= cx * 16 + i < box[2])]
+            for i in xs:
+                if out and out[-1][1] == y and out[-1][0] >= cx * 16 and cx * 16 + i - out[-1][2] <= 2:
+                    out[-1] = (out[-1][0], y, cx * 16 + i + 1, y + 1)
+                else:
+                    out.append((cx * 16 + i, y, cx * 16 + i + 1, y + 1))
+    return out
+
+
+def trainer_hill_roof():
+    facet, own_shell, piece = _helpers()
+
+    def post(name, cx, cy):
+        # its cap on the cell north's upper layer (rows 12-15), its body on its own cell's lower layer; its foot
+        # on its cell's row 14, under the sill drawn over the last post's (15, 11) too
+        return piece(name, upper_apart(TH_ROOF, [(cx, cy - 1)], (cx * 16, cy * 16 - 4, cx * 16 + 16, cy * 16))
+                     + lower_apart(TH_ROOF, [(cx, cy)], TH_ROOF_FLOOR), 18, card=True, foot=cy * 16 + 14)
+
+    # The tower: its west face's foot runs from (112, 69) to (196, 111), a row every two columns, its east face's
+    # mirrored from (205, 110.5) to (288, 69), its front between them on row 111; each 32 rows tall, the top two its
+    # eave's highlight. The doorways' bays stand out of the faces to row 96, 24 rows tall, their lean-to roofs
+    # rising from their fronts' top (row 72) to the faces six rows under the eave: each bay's top laid back flat to
+    # its face's plane, the lean-to's rows over that painted on the face (the faces' pixels behind the bays their
+    # own teal, `fill`). The drawn roof is the tower's top, laid back over the
+    # walls at their height (`base`), each column from the drawing's top to its eave. Side walls close the tower
+    # from its faces back to where its roof begins (row 0 at the walls' height: Z 32).
+    def foot_w(x):
+        return 69 + (x - 112 + 1) // 2
+
+    def foot_e(x):
+        return 110 - (x - 205) // 2
+
+    def eave(x):
+        return (foot_w(x) if x < 196 else 111 if x < 205 else foot_e(x)) - 32
+
+    bays = [piece("block_bay_" + side, [(x, foot(x) - 24, x + 1, 96) for x in range(x0, x1)], 24, foot=96,
+                  solid=True, side=TH_TOWER_SIDE)
+            # (their inner columns, 166 and 233, where they meet their face: the face's)
+            for side, x0, x1, foot in (("w", 136, 166, foot_w), ("e", 234, 264, foot_e))]
+    walls = bays + [
+        dict(facet("wall_tower_w", (112, 37, 68), (196, 79, 110), 32, walls=[((112, 32), (112, 69))],
+                   side=TH_TOWER_SIDE), fill=16),
+        piece("wall_tower_front", [(196, 79, 205, 111)], 32, fill=16, foot=111, side=TH_TOWER_SIDE),
+        dict(facet("wall_tower_e", (205, 78.5, 109.5), (288, 37, 68), 32, walls=[((288, 69), (288, 32))],
+                   side=TH_TOWER_SIDE), fill=16),
+        piece("block_tower_roof", [(x, 0, x + 1, eave(x)) for x in range(112, 288)], 1, base=31, each_foot=True,
+              side=TH_TOWER_SIDE),
+    ]
+    posts = [post("post_%d_%d" % (cx, cy), cx, cy) for cx in (6, 18) for cy in range(4, 10)]
+    posts += [post("post_%d_11" % cx, cx, 11) for cx in range(9, 16)]
+    lamps = [piece("lamp_%d" % cx, upper_apart(TH_ROOF, [(cx, 6), (cx, 7)]), 24, card=True) for cx in (0, 2, 22, 24)]
+    # the roof's back parapet either side of the tower: its teal face (rows 48-63) under its white coping (rows
+    # 40-47, laid back), after the posts, whose first caps are drawn over its face (its own teal behind them)
+    parapets = [piece("wall_parapet_" + side, [(x0, 40, x1, 64)], 16, fill=16, foot=64, side=TH_PARAPET_SIDE)
+                for side, x0, x1 in (("w", 0, 112), ("e", 288, 400))]
+    return own_shell(walls) + posts + lamps + own_shell(parapets)
+
 
 # ── The Pokemon League 1F (Ever Grande City) ───────────────────────────────
 #
@@ -2413,6 +2521,11 @@ def furnished_room_specs():
             "name": "trainer_hill_entrance",
             "interior": {"layout": TH_ENTRANCE, "ground": [0x331, 0x330, 0x335, 0x316, 0x337], "under": "own",
                          "reuse_in": frozenset(), "pieces": trainer_hill_entrance()},
+        },
+        {
+            "name": "trainer_hill_roof",
+            "interior": {"layout": TH_ROOF, "ground": [TH_ROOF_FLOOR], "under": "own",
+                         "reuse_in": frozenset(), "pieces": trainer_hill_roof()},
         },
     ] + [
         {
