@@ -172,13 +172,14 @@ static bool WholeTriangles(void)
 }
 
 /* Every flat face of the models a hair wider (the object audit of 2026-11-14, class 6). A model's flat faces - its
- * floor, its tops, its ground patches - meet in edges that end in another face's corner (a T-junction); rounded
- * apart, the two left pixels between them through which the ground under the model showed - the room's floor laid
- * there for it to stand on - a dotted line of another colour (the Ranking Hall's streaks into the black, the S.S.
- * Tidal's black between its cabins, the tatami houses' entrances). A flat triangle's corners move 1/256 of a tile
- * outwards, their page pixels kept: the faces overlap by a hair instead (the drawing the same either side of a seam),
- * a face's texels moved a 16th of a pixel at the most. The upright faces too were tried: no seam more was closed. The
- * faces looking south a walker stands before (CollectFronts) are upright: unmoved. */
+ * floor, its tops, its ground patches - meet in edges that end in another face's corner (a T-junction); rounded apart,
+ * the two left pixels between them through which the ground under the model showed - the room's floor laid there for
+ * it to stand on - a dotted line of another colour (the Ranking Hall's streaks into the black, the S.S. Tidal's black
+ * between its cabins; the tatami houses' entrances' lines are another thing: a few pixels fewer, still there). A flat
+ * triangle's corners move 1/256 of a tile outwards, their page pixels kept: the faces overlap by a hair instead (the
+ * drawing the same either side of a seam), a face's texels moved a 16th of a pixel at the most. The upright faces too
+ * were tried: no seam more was closed. The faces looking south a walker stands before (CollectFronts) are upright:
+ * unmoved. */
 static void WidenFlatFaces(void)
 {
     const float widen = 1.0f / 256.0f;
