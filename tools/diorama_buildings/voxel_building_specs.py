@@ -638,14 +638,16 @@ CENTER_FLOOR = ("cdc58b", "eedea4", "ffffc5")
 CENTER_COUNTER = ("ffffc5", "e6e6b4", "de9c62", "ffe6b4", "de7b31")
 
 
-def facet(name, a, b, height, walls=(), side=None, cells=()):
+def facet(name, a, b, height, walls=(), side=None, cells=(), meets=None):
     """A chamfered corner: a wall along its foot, from a = (x, top, foot) to
     b in the drawing's pixels, carrying the side walls that run on from it
-    (edge on to the GBA camera, drawn nowhere), `height` tall."""
+    (edge on to the GBA camera, drawn nowhere), `height` tall. `meets`: the Z
+    of the back wall's face at the end that meets it (the end drawn deeper);
+    where the corner stands south of it, its end is closed back to it."""
     (xa, ta, fa), (xb, tb, fb) = a, b
     return {"name": name, "shape": [[(xa, ta), (xb, tb), (xb, fb), (xa, fa)]],
             "height": height, "facet": (a, b), "walls": walls, "side": side,
-            "cells": cells}
+            "cells": cells, "meets": meets}
 
 
 # a stretch of the Center's back wall, full height and one panel wide, as the
@@ -742,11 +744,13 @@ MART = [
     piece("shelf_1", [(96, 62, 112, 111)], 14, back=64),
     piece("shelf_2", [(112, 62, 128, 111)], 14, back=64),
     piece("shelf_3", [(160, 54, 172, 111)], 14, back=64),
-    # the walls as the Center's: 7-px corners, the side walls run on from them
+    # the walls as the Center's: 7-px corners, the side walls run on from them;
+    # a corner's foot is drawn a row below the wall's, and the corner stands a
+    # pixel south of that, so each end is closed back to the wall's face
     facet("corner_w", (0, 6, 40), (7, -1, 33), 34, walls=[((0, 128), (0, 40))],
-          side=MART_WALL_SIDE, cells=[(0, 7)]),
+          side=MART_WALL_SIDE, cells=[(0, 7)], meets=32),
     facet("corner_e", (169, -1, 33), (176, 6, 40), 34, walls=[((176, 40), (176, 128))],
-          side=MART_WALL_SIDE, cells=[(10, 7)]),
+          side=MART_WALL_SIDE, cells=[(10, 7)], meets=32),
     piece("wall", [(7, 0, 169, 32)], 32, fill=16, side=MART_WALL_SIDE),
 ]
 
@@ -854,9 +858,12 @@ def brendan_1f():
         stairwell("stairwell", 128, 144, 48, 29, 19, (128, 29, 144, 34), 16),
         # the back wall, a cell forward east of the step; the doorway is cut
         # out of it and it stands on its foot
+        # its west side, and the same a pixel in: the step's outline (x 112) is drawn
+        # only below the back wall's foot, so above it the 3D cameras saw through a
+        # slot into the hollow behind the face, black (the object audit, class 3)
         piece("wall_e", [(112, 32, 113, 48), (113, 16, 176, 29), (113, 29, 128, 48),
                          (144, 29, 176, 48)], 32, fill=16, foot=48,
-              side=(156, 16, 172, 48), walls=[((112, 32), (112, 48))]),
+              side=(156, 16, 172, 48), walls=[((112, 32), (112, 48)), ((113, 32), (113, 48))]),
         piece("wall", [(0, 0, 113, 32), (113, 0, 117, 16)], 32, fill=16, foot=32,
               side=(72, 0, 80, 32)),
         piece("side_w", [], 32, side=(72, 0, 80, 32), walls=[((0, 144), (0, 32))]),
@@ -879,9 +886,10 @@ def may_1f():
         # (gen_voxel_buildings.reuse_pieces)
         piece("dresser", [(105, 19, 128, 48)], 23, back=32),
         stairwell("stairwell", 32, 48, 48, 29, 19, (32, 29, 48, 34), 16),
+        # its east side and the same a pixel in, as Brendan's (the step's outline slot)
         piece("wall_w", [(63, 32, 64, 48), (0, 16, 63, 29), (0, 29, 32, 48),
                          (48, 29, 63, 48)], 32, fill=16, foot=48,
-              side=(4, 16, 20, 48), walls=[((64, 48), (64, 32))]),
+              side=(4, 16, 20, 48), walls=[((64, 48), (64, 32)), ((63, 48), (63, 32))]),
         piece("wall", [(63, 0, 176, 32), (59, 0, 63, 16)], 32, fill=16, foot=32,
               side=(96, 0, 104, 32)),
         piece("side_w", [], 32, side=(4, 16, 20, 48), walls=[((0, 144), (0, 48))]),

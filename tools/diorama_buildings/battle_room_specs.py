@@ -94,9 +94,10 @@ def champion_room():
     return own_shell([
         piece("steps", [(80, 40, 128, 80)], 24, solid=True, side=(84, 56, 100, 80)),
         facet("corner_w", (0, 48, 112), (48, 0, 64), 64,
-              walls=[((0, CHAMP_H), (0, 112))], side=CHAMP_SIDE, cells=[(0, 12)]),
+              walls=[((0, CHAMP_H), (0, 112))], side=CHAMP_SIDE, cells=[(0, 12)], meets=64),
         facet("corner_e", (160, 0, 64), (208, 48, 112), 64,
-              walls=[((CHAMP_W, 112), (CHAMP_W, CHAMP_H))], side=CHAMP_SIDE, cells=[(12, 12)]),
+              walls=[((CHAMP_W, 112), (CHAMP_W, CHAMP_H))], side=CHAMP_SIDE, cells=[(12, 12)],
+              meets=64),
         piece("wall", [(48, 0, 160, 64)], 60, fill=16, foot=64, side=CHAMP_SIDE),
     ])
 
@@ -163,9 +164,10 @@ def factory_hall():
     facet, own_shell, piece = _helpers()
     return own_shell([
         facet("corner_w", (0, 16, 56), (16, 0, 40), 40,
-              walls=[((0, FACTORY_H), (0, 56))], side=FACTORY_SIDE, cells=[(0, 11)]),
+              walls=[((0, FACTORY_H), (0, 56))], side=FACTORY_SIDE, cells=[(0, 11)], meets=40),
         facet("corner_e", (192, 0, 40), (208, 16, 56), 40,
-              walls=[((FACTORY_W, 56), (FACTORY_W, FACTORY_H))], side=FACTORY_SIDE, cells=[(12, 11)]),
+              walls=[((FACTORY_W, 56), (FACTORY_W, FACTORY_H))], side=FACTORY_SIDE, cells=[(12, 11)],
+              meets=40),
         piece("wall", [(16, 0, 192, 40)], 40, fill=16, foot=40, side=FACTORY_SIDE),
     ])
 

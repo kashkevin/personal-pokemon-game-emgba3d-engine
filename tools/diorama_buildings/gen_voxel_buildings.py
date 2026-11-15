@@ -966,6 +966,19 @@ def interior_specs(spec):
             ox, oz = x0 * 16, y0 * 16
             parts = [vb.Facet(pc["name"], (xa - ox, fa + 1 - oz), (xb - ox, fb + 1 - oz),
                               fa + 1 - ta, fb + 1 - tb)]
+            # its end at the back wall (the end drawn deeper) stands south of the wall's face
+            # where its foot is drawn on the wall's or below: a ray past that end slipped
+            # behind it into the outside, a crack down the corner from the 3D cameras (the
+            # Marts' 2 px, the Champion's room's and the Factory's hall's 1 px dashed; the
+            # object audit of 2026-11-14, class 3). A cheek closes the end back to the face,
+            # its top on the corner's top row and dressed with the corner's end column; edge on
+            # to the GBA camera, it draws nothing of the drawing.
+            meets = pc.get("meets")
+            x, t, f, facing, u = ((xb, tb, fb, 1, xb - 0.5) if fb < fa else
+                                  (xa, ta, fa, -1, xa + 0.5))
+            if meets is not None and f + 1 > meets:
+                parts.append(vb.Cheek(pc["name"] + "_end", x - ox, meets - oz, f + 1 - oz,
+                                      t - oz, u - ox, facing))
         elif not mine:
             parts = []  # a stairwell's sides: walls only, drawn nowhere
         else:

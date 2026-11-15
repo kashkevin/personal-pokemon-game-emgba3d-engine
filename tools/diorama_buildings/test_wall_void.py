@@ -186,5 +186,59 @@ class FreeCellTests(unittest.TestCase):
         self.assertIn((10 - wx, 1 - wy), models[0].owned)
 
 
+class ClosedCornerTests(unittest.TestCase):
+    """Where a room's back wall turns, the 3D cameras saw the outside through gaps the GBA's camera
+    cannot (the object audit of 2026-11-14, class 3). A chamfered corner stands a pixel south of its
+    drawn foot; where its end at the back wall is drawn on the wall's foot or below, that end stood
+    south of the wall's face, and a crack ran down each corner - black, 2 px in the Marts, dashed, 1
+    px, in the Champion's room and the Factory's battle hall. A cheek closes the end back to the face.
+    Brendan's and May's ground floors: the step's outline is drawn only below the back wall's foot,
+    and above it the cameras saw through a slot into the hollow behind the stepped wall's face."""
+
+    @staticmethod
+    def room(layout):
+        import voxel_building_specs as specs
+        spec = next(s for s in specs.SPECS if s.get("interior", {}).get("layout") == layout)
+        return g.interior_specs(spec)
+
+    def cheeks(self, layout):
+        out = {}
+        for ps in self.room(layout):
+            x0, y0, w, h = ps["rect"]
+            ox, oz = x0 * 16, y0 * 16
+            for part in ps["parts"]():
+                if isinstance(part, vb.Cheek):
+                    out[part.name] = (part.x + ox, part.z0 + oz, part.z1 + oz, part.crest + oz,
+                                      part.u + ox, part.facing)
+        return out
+
+    def test_a_corner_is_closed_back_to_the_wall(self):
+        # x, from the wall's face to the corner's end, the corner's top row, its end column, facing
+        self.assertEqual(self.cheeks("LAYOUT_MART"),
+                         {"corner_w_end": (7, 32, 34, -1, 6.5, 1),
+                          "corner_e_end": (169, 32, 34, -1, 169.5, -1)})
+        self.assertEqual(self.cheeks("LAYOUT_EVER_GRANDE_CITY_CHAMPIONS_ROOM"),
+                         {"corner_w_end": (48, 64, 65, 0, 47.5, 1),
+                          "corner_e_end": (160, 64, 65, 0, 160.5, -1)})
+        self.assertEqual(self.cheeks("LAYOUT_BATTLE_FRONTIER_BATTLE_FACTORY_BATTLE_ROOM"),
+                         {"corner_w_end": (16, 40, 41, 0, 15.5, 1),
+                          "corner_e_end": (192, 40, 41, 0, 192.5, -1)})
+
+    def test_a_corner_on_the_walls_face_needs_none(self):
+        # the Center's corners are drawn a row above the wall's foot: standing a pixel south, they meet it
+        self.assertEqual(self.cheeks("LAYOUT_POKEMON_CENTER_1F"), {})
+
+    def test_the_step_is_closed_a_pixel_in(self):
+        for layout, name, sides in (("LAYOUT_LITTLEROOT_TOWN_BRENDANS_HOUSE_1F", "wall_e", {112, 113}),
+                                    ("LAYOUT_LITTLEROOT_TOWN_MAYS_HOUSE_1F", "wall_w", {64, 63})):
+            ps = next(p for p in self.room(layout) if p["name"].endswith("_" + name))
+            x0, y0, w, h = ps["rect"]
+            walls = [part for part in ps["parts"]() if isinstance(part, vb.PlainWall)]
+            # both run the step's depth, 32 to 48, at the outline's x and a pixel in
+            self.assertEqual({part.a[0] + x0 * 16 for part in walls}, sides, layout)
+            for part in walls:
+                self.assertEqual(sorted((part.a[1] + y0 * 16, part.b[1] + y0 * 16)), [32, 48], layout)
+
+
 if __name__ == "__main__":
     unittest.main()
