@@ -84,7 +84,9 @@ GENERAL_BUILDING = (set(range(0x008, 0x00D)) | set(range(0x010, 0x015)) | set(ra
 #   "steps": [((x0, x1), height)]: map columns (in cells, halves allowed)
 #       whose front stands `height` pixels high, not the facade's;
 #   "flat": [(x0, x1)]: map columns of its cells whose drawing lies flat on
-#       the ground (a railing drawn in the same cells).
+#       the ground (a railing drawn in the same cells);
+#   "plain": [(x0, y0, x1, y1)]: map pixels of its facade that are not
+#       windows, whatever their colours (dimensional.facade_details).
 OVERRIDES = {
     # Tall buildings: the drawing is nearly all facade, a sliver of roof.
     ("LilycoveCity", 27, 6): {"facade": 106},           # the department store
@@ -159,6 +161,11 @@ OVERRIDES = {
         "steps": [((13.5, 15.5), 29), ((23.5, 25.5), 29)],
         "flat": [(13.0, 13.5), (25.5, 26.0)],
         "ground": [0x001, 0x2DA, 0x2DE]},
+    # The Ranking Hall: along its wall's foot, under the pale panels either
+    # side of its door, a band of light blue shading that window_glow takes
+    # for glass - two strips 30 pixels by 4 set back as windows with sills
+    # on the ground (V44). They stay the wall's face.
+    ("BattleFrontier_OutsideEast", 35, 12): {"plain": [(522, 203, 552, 207), (584, 203, 614, 207)]},
 }
 # Maps whose doors are cut into the rock round them (Sootopolis's crater):
 # the door search runs on into the rock. Their houses are found by their
@@ -579,14 +586,19 @@ def auto_specs(taken, only_map=None):
             roof = roof_of(data["name"], (x, y))
             if roof is not None:
                 relief["roof"] = roof
-            specs.append({
+            spec = {
                 "name": "auto_%s_%d_%d" % (data["name"].lower(), x, y),
                 "layout": data["layout"],
                 "rect": (x0, y0, w, h),
                 "ground": ground,
                 "owned": owned,
                 "relief": relief,
-            })
+            }
+            if "plain" in over:
+                # map pixels as the drawing's
+                spec["plain"] = [(a - x0 * 16, b - y0 * 16, c - x0 * 16, d - y0 * 16)
+                                 for (a, b, c, d) in over["plain"]]
+            specs.append(spec)
     return specs
 
 

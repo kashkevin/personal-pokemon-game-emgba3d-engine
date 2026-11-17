@@ -922,10 +922,11 @@ def recess(mesh, art_rect, depth, sill=False, name="recess"):
     return True
 
 
-def facade_details(model, doors=()):
+def facade_details(model, doors=(), plain=()):
     """Recess the windows and the doors (art rectangles, `doorway`) of a
     model's facades. Returns the art rectangles changed, which the proof
-    leaves out."""
+    leaves out. `plain`: art rectangles that are not windows whatever their
+    colours (auto_buildings.OVERRIDES: the Ranking Hall's shading band, V44)."""
     art = model.art
     W, H = art.size
     px = art.load()
@@ -951,6 +952,9 @@ def facade_details(model, doors=()):
         if any(r[0] < rect[2] and rect[0] < r[2] and r[1] < rect[3] and rect[1] < r[3]
                for r in changed):
             continue                    # a door's glass
+        if any(r[0] < rect[2] and rect[0] < r[2] and r[1] < rect[3] and rect[1] < r[3]
+               for r in plain):
+            continue                    # the wall's face, not glass
         if recess(model.mesh, rect, WINDOW_DEPTH, sill=True, name=model.name + ".window"):
             changed.append(rect)
     return changed
@@ -1141,5 +1145,5 @@ def detail_model(model):
         r = doorway(layout, x + i, y + j)
         if r is not None:
             doors.append((r[0] - x * 16, r[1] - y * 16, r[2] - x * 16, r[3] - y * 16))
-    model.details = facade_details(model, doors)
+    model.details = facade_details(model, doors, spec.get("plain", ()))
     return len(model.details)

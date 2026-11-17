@@ -239,6 +239,38 @@ class RecessTests(unittest.TestCase):
         self.assertIn(rect, found)
 
 
+class PlainTests(unittest.TestCase):
+    """A rectangle of a facade named `plain` (auto_buildings.OVERRIDES) is not set back as a window,
+    whatever its colours: the Ranking Hall's band of light blue shading along its wall's foot (V44)."""
+
+    @staticmethod
+    def model():
+        img = Image.new("RGBA", (48, 64), WALL + (255,))
+        rect = window(img, 10, 30)
+
+        class Model:
+            pass
+        m = Model()
+        m.art, m.mesh, m.name = img, facade_mesh(48, 64, 64.0), "test"
+        return m, rect
+
+    def test_a_window_is_set_back_unless_it_is_named_plain(self):
+        m, rect = self.model()
+        self.assertIn(rect, dm.facade_details(m))
+        recessed = len(m.mesh.tris)
+        m, rect = self.model()
+        self.assertEqual(dm.facade_details(m, plain=[(rect[0] - 2, rect[1], rect[2], rect[3] - 1)]), [])
+        self.assertLess(len(m.mesh.tris), recessed)
+
+    def test_the_ranking_halls_band_is_named_in_map_pixels(self):
+        over = auto_buildings.OVERRIDES[("BattleFrontier_OutsideEast", 35, 12)]
+        for (x0, y0, x1, y1) in over["plain"]:
+            # along the foot of its front, the row of cells its door is in, either side of the door
+            self.assertEqual((y0 // 16, (y1 - 1) // 16), (12, 12))
+            self.assertTrue(x1 <= 35 * 16 or x0 >= 36 * 16)
+            self.assertEqual((x1 - x0, y1 - y0), (30, 4))
+
+
 class DoorTests(unittest.TestCase):
     def test_a_doorway_is_where_the_door_opens(self):
         # Lilycove's houses: the door's leaf in its cell and the four pixels
