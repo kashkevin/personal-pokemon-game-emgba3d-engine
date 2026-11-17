@@ -1562,20 +1562,45 @@ class Decal:
     quad per cell, drawn from the floor-only copy of the drawing that the
     model's art carries `v_offset` rows below its own."""
 
-    def __init__(self, name, cells, v_offset, lift=0.5):
+    # The sides of its cells named in `edges` ((i, j, side), side one of "wens":
+    # gen_voxel_buildings.floor_decal_edges) hang a skirt down to the floor: a quad from the decal's
+    # edge to its cell's edge on the floor along the GBA's line of sight, its edge's texels stretched
+    # over it (`~clamp`). Lifted over the floor, the decal's edge drew off its cell's edge from a camera
+    # turned from the GBA's, and where the floor laid under the model there is another colour it showed
+    # in dashes: Wanda's planks beside her chair, house 1's, whose rug round it is its own decal (the
+    # object audit's class 6). The skirt closes that gap; from the GBA's camera it is seen edge on (a
+    # side's skirt stands across the line of sight's own plane, the front's and back's lie along it), so
+    # at 45 degrees nothing changes, however large the picture.
+
+    def __init__(self, name, cells, v_offset, lift=0.5, edges=()):
         self.name, self.cells, self.v_offset, self.lift = name, cells, v_offset, lift
+        self.edges = set(edges)
 
     def emit(self, mesh):
         y, o = self.lift, self.v_offset
-        for (i, j) in self.cells:
-            x0, z0, x1, z1 = i * 16.0, j * 16.0, i * 16.0 + 16.0, j * 16.0 + 16.0
-            quad = [(x0, y, z0), (x1, y, z0), (x1, y, z1), (x0, y, z1)]
+
+        def quad(xa, za, xb, zb, tex, tag):
+            corners = [(xa, za), (xb, za), (xb, zb), (xa, zb)]
             # Half a pixel above the floor drawn under it - any less and the
             # console's depth buffer cannot tell them apart up close - and
             # lifted along the GBA's line of sight (as the terrain's relief
             # lifts a cell), so at 45 degrees it covers its own rows exactly.
-            mesh.poly([(x, yy, z + y, x, z + o) for (x, yy, z) in quad], SHADE_ART,
-                      self.name + ".decal")
+            mesh.poly([(x, y, z + y) + tex(x, z) for (x, z) in corners], SHADE_ART, self.name + tag)
+
+        for (i, j) in self.cells:
+            x0, z0, x1, z1 = i * 16.0, j * 16.0, i * 16.0 + 16.0, j * 16.0 + 16.0
+            quad(x0, z0, x1, z1, lambda x, z: (x, z + o), ".decal")
+            # the skirts: the texels of the edge (a quarter texel in) from the floor up to the decal
+            ua, ub, va, vb = x0 + 0.25, x1 - 0.25, z0 + 0.25 + o, z1 - 0.25 + o
+            skirts = {
+                "w": [(x0, 0.0, z0, ua, va), (x0, 0.0, z1, ua, vb), (x0, y, z1 + y, ua, vb), (x0, y, z0 + y, ua, va)],
+                "e": [(x1, 0.0, z0, ub, va), (x1, 0.0, z1, ub, vb), (x1, y, z1 + y, ub, vb), (x1, y, z0 + y, ub, va)],
+                "n": [(x0, 0.0, z0, ua, va), (x1, 0.0, z0, ub, va), (x1, y, z0 + y, ub, va), (x0, y, z0 + y, ua, va)],
+                "s": [(x0, 0.0, z1, ua, vb), (x1, 0.0, z1, ub, vb), (x1, y, z1 + y, ub, vb), (x0, y, z1 + y, ua, vb)],
+            }
+            for side in "wens":
+                if (i, j, side) in self.edges:
+                    mesh.poly(skirts[side], SHADE_ART, self.name + ".skirt~clamp")
 
 
 class Void:

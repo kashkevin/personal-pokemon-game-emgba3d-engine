@@ -718,6 +718,7 @@ def interior_specs(spec):
             full.paste(layout.cell_image(layout.metatile(x, y)), (x * 16, y * 16))
     fpx = full.load()
     floors = [layout.cell_image(m).load() for m in room["ground"]]
+    outside_cache = {}
     # the floor metatiles' own colours (card_quads: the floor seen through a card's drawing)
     floor_colours = {f[i, j] for f in floors for j in range(16) for i in range(16)}
     raw = room["pieces"]
@@ -991,6 +992,7 @@ def interior_specs(spec):
                         under = mark_under(x, y)
                         if under is not None:
                             apx[lx, ly + uo] = under
+        ring_under_marks(apx, w * 16, h * 16, h * 16, uo)
         if sample:
             side = vb.Tile(0, 2 * h * 16, sw, 2 * h * 16 + sh)
         else:
@@ -1071,8 +1073,25 @@ def interior_specs(spec):
         local = [(cx - x0, cy - y0) for (cx, cy) in cells
                  if art.crop(((cx - x0) * 16, (cy - y0) * 16 + h * 16,
                               (cx - x0) * 16 + 16, (cy - y0) * 16 + h * 16 + 16)).getbbox()]
+        # the floor laid under the piece where it stands (placement_ground): the room's first
+        # ground, or its cells' own drawing
+        under_own = pc.get("own_floor") or (
+            pc["name"].startswith("side") and pc.get("walls") and not pc.get("shape")
+            and not any(opened[y][x] for y in range(y0 * 16, min(H, (y0 + h) * 16))
+                        for x in range(x0 * 16, min(W, (x0 + w) * 16))))
+        under_kind = "own" if under_own else room.get("under")
         if local:
-            parts.append(vb.Decal(pc["name"] + "_floor", local, h * 16))
+            # a skirt down to the floor at the sides where the floor laid under it is another colour
+            # (vb.Decal `edges`), not over the room's outside
+            if under_kind == "own":
+                def ground_at(cx, cy):
+                    return full.crop((cx * 16, cy * 16, cx * 16 + 16, cy * 16 + 16)).load()
+            else:
+                def ground_at(cx, cy):
+                    return floors[0]
+            edges = floor_decal_edges(local, (x0, y0), apx, h * 16, ground_at,
+                                      lambda cx, cy: outside_cell(fpx, W, H, cx, cy, outside_cache))
+            parts.append(vb.Decal(pc["name"] + "_floor", local, h * 16, edges=edges))
         hidden = [(cx - x0, cy - y0) for (cx, cy) in cells
                   if art.crop(((cx - x0) * 16, (cy - y0) * 16 + uo,
                                (cx - x0) * 16 + 16, (cy - y0) * 16 + uo + 16)).getbbox()]
@@ -1095,11 +1114,7 @@ def interior_specs(spec):
                       # its floor decal's edge as a line of another colour (the tatami houses' entrances,
                       # the object audit of 2026-11-14, class 6) - unless a room's black front corner,
                       # laid as floor (`open`), is one of its cells: its own drawing there is the black
-                      "under": "own" if pc.get("own_floor") or (
-                                   pc["name"].startswith("side") and pc.get("walls") and not pc.get("shape")
-                                   and not any(opened[y][x] for y in range(y0 * 16, min(H, (y0 + h) * 16))
-                                               for x in range(x0 * 16, min(W, (x0 + w) * 16))))
-                               else room.get("under"),
+                      "under": under_kind,
                       "card": bool(pc.get("card")), "wall": bool(pc.get("fill")),
                       # the cells of its rectangle it does not answer for (piece `free`)
                       "free": {(cx - x0, cy - y0) for (cx, cy) in pc.get("free", ())}}
@@ -1277,6 +1292,79 @@ def reach_outside(spans, ox, oy, fpx, W, H, reach=VOID_REACH):
         out.append((a, b, z0, z1))
         out += [(lo, hi, r0, r1) for (lo, hi, rows) in sides if rows is not None for (r0, r1) in [rows]]
     return out
+
+
+def outside_cell(fpx, W, H, cx, cy, cache):
+    """Whether cell (cx, cy) of a room's drawing (`fpx`, W x H pixels) is its outside: past its map,
+    or drawn black all over."""
+    if not (0 <= cx * 16 < W and 0 <= cy * 16 < H):
+        return True
+    if (cx, cy) not in cache:
+        x0, y0 = cx * 16, cy * 16
+        cache[(cx, cy)] = all(fpx[x0 + u, y0 + v][:3] == (0, 0, 0)
+                              for v in range(min(16, H - y0)) for u in range(min(16, W - x0)))
+    return cache[(cx, cy)]
+
+
+DECAL_SIDES = (("w", (-1, 0)), ("e", (1, 0)), ("n", (0, -1)), ("s", (0, 1)))
+
+
+def floor_decal_edges(local, origin, apx, v_offset, ground_at, outside):
+    """The sides of a piece's floor-decal cells that hang a skirt down to the floor (vb.Decal
+    `edges`): (i, j, side) for a side with no cell of the decal's own (`local`) beyond it, not on
+    the room's outside (`outside(cx, cy)`), whose edge texels - the decal's outermost column or row
+    in its cell, the copy of the floor's marks `v_offset` rows below the piece in its art (`apx`) -
+    are not all what the floor laid under that cell draws there (`ground_at(cx, cy)`: 16 x 16
+    pixels; `origin`: the piece's first cell in the room). From a camera turned from the GBA's the
+    decal's edge draws off its cell's edge, and that floor shows past it: dashes where it is another
+    colour (Wanda's planks round house 1's rug), nothing to see where it is the same (a tiled floor's
+    marks over the same tiles). Towards another piece's marks too: where Wanda's chair meets her
+    table's marks the planks still showed in a hairline from the low cameras until its skirt was
+    there; where the marks beside it are as high, the skirt is under them both."""
+    x0, y0 = origin
+    near = set(local)
+    out = set()
+    for (i, j) in local:
+        ground = None
+        for side, (di, dj) in DECAL_SIDES:
+            if (i + di, j + dj) in near or outside(x0 + i + di, y0 + j + dj):
+                continue
+            if ground is None:
+                ground = ground_at(x0 + i, y0 + j)
+            if side in "we":
+                u = 0 if side == "w" else 15
+                texels = [(u, t) for t in range(16)]
+            else:
+                v = 0 if side == "n" else 15
+                texels = [(t, v) for t in range(16)]
+            for (u, v) in texels:
+                p = apx[i * 16 + u, v_offset + j * 16 + v]
+                if p[3] >= 128 and tuple(p[:3]) != tuple(ground[u, v][:3]):
+                    out.add((i, j, side))
+                    break
+    return out
+
+
+def ring_under_marks(apx, w, h, floor_v, under_v):
+    """Run what the pieces hide of the floor's marks (the copy `under_v` rows down a piece's art,
+    w x h pixels) on a texel under the marks round it (the copy `floor_v` rows down), in their
+    colours. The two are laid apart - the hidden marks a quarter pixel over the floor (vb.Decal
+    `lift`), under the piece's front at 45 degrees; the marks round it half a pixel - and from a
+    camera turned from the GBA's their edges part: the floor laid under the piece showed between
+    them in specks (four of Wanda's planks round house 1's chair and table, from the low cameras;
+    the object audit's class 6). At 45 degrees the marks lie over the ring; turned, it fills the
+    parting with their colours."""
+    ring = {}
+    for y in range(h):
+        for x in range(w):
+            if apx[x, under_v + y][3] >= 128 or apx[x, floor_v + y][3] < 128:
+                continue
+            if any(0 <= x + dx < w and 0 <= y + dy < h and apx[x + dx, under_v + y + dy][3] >= 128
+                   for dy in (-1, 0, 1) for dx in (-1, 0, 1)):
+                ring[(x, y)] = apx[x, floor_v + y]
+    for (x, y), c in ring.items():
+        apx[x, under_v + y] = c
+    return len(ring)
 
 
 def spare_black_texel(art, w, h, sample_w, sample_h, marked):
