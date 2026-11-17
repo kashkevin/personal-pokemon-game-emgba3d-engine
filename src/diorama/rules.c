@@ -1415,7 +1415,10 @@ float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
      * east is high on the east - terrace_topology RAMP_ROLES; KNOWN_ISSUES MS-162.) */
     if (direction == 0 || direction == 3)
         coordinate = DIORAMA_BUILDING_PIXELS_PER_CELL - 1 - coordinate;
-    if (behavior == MB_MUDDY_SLOPE || behavior == MB_BUMPY_SLOPE)
+    /* The Mach Bike's muddy slopes climb in one-pixel steps; stairs and the Acro Bike's bumpy slopes in four-pixel
+     * steps (one-pixel steps drew a bumpy slope's stones on slats, each riser a darker band: the owner's choice of
+     * 2026-11-17, docs/owner-decisions.md #71 B; a smooth slope, C, is later work). */
+    if (behavior == MB_MUDDY_SLOPE)
         step = coordinate + 1;
     else
         step = (coordinate / 4 + 1) * 4;

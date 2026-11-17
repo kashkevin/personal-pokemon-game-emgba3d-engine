@@ -635,6 +635,15 @@ static void TestGenericMesherUtilities(void)
         MB_NORMAL, 0.0f, 1.0f, 8, 0) == -1.0f);
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
         MB_BUMPY_SLOPE, 0.0f, 1.0f, 8, 8) == 0.5f);
+    /* a bumpy slope climbs in the stairs' four-pixel steps (#71 B), a muddy slope in one-pixel steps */
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
+        MB_BUMPY_SLOPE, 0.0f, 1.0f, 8, 9) == 0.5f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
+        MB_BUMPY_SLOPE, 0.0f, 1.0f, 8, 15) == 0.25f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
+        MB_MUDDY_SLOPE, 0.0f, 1.0f, 8, 9) == 0.4375f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
+        MB_MUDDY_SLOPE, 0.0f, 1.0f, 8, 15) == 0.0625f);
     memset(&bridge, 0, sizeof(bridge));
     bridge.archetype = DIORAMA_ARCHETYPE_STAIRS_N;
     bridge.featureHeight = 1.0f;

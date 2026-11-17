@@ -762,6 +762,8 @@ static void TestCliffFaceBandsAndRamp(void)
     struct DioramaTerrainChunkInput input;
     struct DioramaTerrainMesh mesh;
     struct DioramaTerrainCell *center;
+    uint32_t stairsTopFaces;
+    uint64_t stairsHash;
 
     InitInput(&input, 3, MB_NORMAL);
     center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
@@ -773,14 +775,31 @@ static void TestCliffFaceBandsAndRamp(void)
     assert(mesh.sideFaceCount == 12);
     assert(mesh.bounds.maxY == 2.5f);
 
+    /* a muddy slope climbs in one-pixel steps */
     InitInput(&input, 3, MB_NORMAL);
     center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
-    center->behavior = MB_BUMPY_SLOPE;
+    center->behavior = MB_MUDDY_SLOPE;
     center->shape = DIORAMA_SHAPE_STAIRS;
     center->archetype = DIORAMA_ARCHETYPE_STAIRS_N;
     center->featureHeight = 1.0f;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(mesh.topFaceCount == 79);
+    assert(mesh.bounds.maxY == 1.0f);
+
+    /* a bumpy slope in the stairs' four-pixel steps (docs/owner-decisions.md #71 B): built as stairs are */
+    InitInput(&input, 3, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->shape = DIORAMA_SHAPE_STAIRS;
+    center->archetype = DIORAMA_ARCHETYPE_STAIRS_N;
+    center->featureHeight = 1.0f;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    stairsTopFaces = mesh.topFaceCount;
+    stairsHash = mesh.geometryHash;
+    center->behavior = MB_BUMPY_SLOPE;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.topFaceCount == stairsTopFaces);
+    assert(mesh.topFaceCount < 79);
+    assert(mesh.geometryHash == stairsHash);
     assert(mesh.bounds.maxY == 1.0f);
 }
 
