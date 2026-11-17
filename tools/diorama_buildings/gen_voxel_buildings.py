@@ -947,6 +947,7 @@ def interior_specs(spec):
             void = wall_void_spans({(x - ox, y - oy) for (x, y) in list(mine) + list(fill)},
                                    None if pc.get("foot") is None else pc["foot"] - oy,
                                    int(pc["height"]), outside_above)
+            void = reach_outside(void, ox, oy, fpx, W, H)
             black = min(((x - ox, y - oy) for (x, y) in mine if fpx[x, y][:3] == (0, 0, 0)),
                         key=lambda p: (p[1], p[0]), default=None)
         art = Image.new("RGBA", (max(w * 16, sw, tw), uo + h * 16), (0, 0, 0, 0))
@@ -1228,6 +1229,54 @@ def wall_void_spans(pixels, foot, height, outside_above):
         else:
             spans.append((u, u + 1, z0, z1))
     return spans
+
+
+VOID_REACH = 1
+
+
+def reach_outside(spans, ox, oy, fpx, W, H, reach=VOID_REACH):
+    """A wall's void spans (wall_void_spans; model pixels, the model's origin at `ox`, `oy` of the
+    room's drawing `fpx`, W x H) carried `reach` pixels on past either end beside the rows where the
+    drawing is the room's outside (black, or past the room's edge): the whole span where all its rows
+    are, a strip of its own over a run of them otherwise. Not over the rows above it: between stepped
+    walls those are the notch the 3D cameras see floor in (the Ranking Hall's, black stripes there). The void's edge and the edge of the floor laid under the wall's cells were
+    one line, the void lifted over the floor, and from a camera turned from the GBA's the floor showed
+    past the void in dots: the S.S. Tidal's carpet between its cabins, the Ranking Hall's marble in its
+    corner (the object audit of 2026-11-14, class 6). Over the outside's black it draws black; at 45
+    degrees it lies under the wall's own rows (~behind), as before. The outside is a cell drawn black
+    all over: beside a wall's end a cell partly black can be floor the 3D cameras see (the Ranking
+    Hall's counter wall: the reach laid black stripes over it)."""
+    cells = {}
+
+    def black(x, y):
+        if not (0 <= x < W and 0 <= y < H):
+            return True
+        key = (x // 16, y // 16)
+        if key not in cells:
+            cx, cy = key[0] * 16, key[1] * 16
+            cells[key] = all(fpx[cx + u, cy + v][:3] == (0, 0, 0)
+                             for v in range(min(16, H - cy)) for u in range(min(16, W - cx)))
+        return cells[key]
+    out = []
+    for (u0, u1, z0, z1) in spans:
+        sides = []
+        for (u, lo, hi) in ((u0 - 1, u0 - reach, u0), (u1, u1, u1 + reach)):
+            rows = [black(ox + u, oy + z) for z in range(z0, z1)]
+            if all(rows):
+                sides.append((lo, hi, None))
+                continue
+            run = None
+            for k, ok in enumerate(rows + [False]):
+                if ok and run is None:
+                    run = z0 + k
+                elif not ok and run is not None:
+                    sides.append((lo, hi, (run, z0 + k)))
+                    run = None
+        a = min([u0] + [lo for (lo, hi, rows) in sides if rows is None and hi == u0])
+        b = max([u1] + [hi for (lo, hi, rows) in sides if rows is None and lo == u1])
+        out.append((a, b, z0, z1))
+        out += [(lo, hi, r0, r1) for (lo, hi, rows) in sides if rows is not None for (r0, r1) in [rows]]
+    return out
 
 
 def spare_black_texel(art, w, h, sample_w, sample_h, marked):
@@ -1712,10 +1761,16 @@ def find_placements(model, layouts_json):
                 odd = sorted(model.owned)
                 model.spec.setdefault("patch_all", set()).add(entry["id"])
             found.append((index + 1, px, py, ground, entry["id"], odd))
-    # and the rooms that repeat a piece of furniture's tiles (reuse_pieces):
-    # on a modelled room's floor, or, in a room nobody modelled, on its
-    # commonest floor with the rest of its cells laid over it as patches
+    return found + reused_placements(model, layouts_json)
+
+
+def reused_placements(model, layouts_json):
+    """The rooms that repeat a piece of furniture's tiles (reuse_pieces): on a modelled room's floor,
+    or, in a room nobody modelled, on its commonest floor with the rest of its cells laid over it as
+    patches."""
+    w, h = model.cells
     ids = [e.get("id") for e in layouts_json]
+    found = []
     for (lid, px, py, ground) in model.spec.get("reused_at", ()):
         if ground is None:
             blocks = _layout_art(lid).blocks
