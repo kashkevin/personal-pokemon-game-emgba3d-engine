@@ -1,4 +1,4 @@
-// The Windows gamepad mapping (include/platform/gamepad.h): every button combination equals the
+// The gamepad mapping (include/platform/gamepad.h): XInput's: every button combination equals the
 // shift arithmetic the game used before the mapping became a function, sticks and the trigger
 // behave at their thresholds, and nothing a pad does can set a bit outside the GBA's ten keys.
 #include <stdint.h>
@@ -103,6 +103,88 @@ MT_TEST(random_input_never_sets_a_bit_outside_the_ten_game_keys)
     }
 }
 
+// SDL's controllers (a PlayStation or Switch Pro pad): every SDL button does what the same XInput button does, the
+// stick's down (positive in SDL) is Down, and SDL's numbering is SDL2's own (checked against SDL's header).
+#include <SDL2/SDL_gamecontroller.h>
+#define SAME_BUTTON(ours, sdl) _Static_assert((int)(ours) == (int)(sdl), "SDL2's button numbering: " #sdl)
+SAME_BUTTON(GAMEPAD_SDL_A, SDL_CONTROLLER_BUTTON_A);
+SAME_BUTTON(GAMEPAD_SDL_B, SDL_CONTROLLER_BUTTON_B);
+SAME_BUTTON(GAMEPAD_SDL_X, SDL_CONTROLLER_BUTTON_X);
+SAME_BUTTON(GAMEPAD_SDL_Y, SDL_CONTROLLER_BUTTON_Y);
+SAME_BUTTON(GAMEPAD_SDL_BACK, SDL_CONTROLLER_BUTTON_BACK);
+SAME_BUTTON(GAMEPAD_SDL_GUIDE, SDL_CONTROLLER_BUTTON_GUIDE);
+SAME_BUTTON(GAMEPAD_SDL_START, SDL_CONTROLLER_BUTTON_START);
+SAME_BUTTON(GAMEPAD_SDL_LEFT_STICK, SDL_CONTROLLER_BUTTON_LEFTSTICK);
+SAME_BUTTON(GAMEPAD_SDL_RIGHT_STICK, SDL_CONTROLLER_BUTTON_RIGHTSTICK);
+SAME_BUTTON(GAMEPAD_SDL_LEFT_SHOULDER, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+SAME_BUTTON(GAMEPAD_SDL_RIGHT_SHOULDER, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER);
+SAME_BUTTON(GAMEPAD_SDL_DPAD_UP, SDL_CONTROLLER_BUTTON_DPAD_UP);
+SAME_BUTTON(GAMEPAD_SDL_DPAD_DOWN, SDL_CONTROLLER_BUTTON_DPAD_DOWN);
+SAME_BUTTON(GAMEPAD_SDL_DPAD_LEFT, SDL_CONTROLLER_BUTTON_DPAD_LEFT);
+SAME_BUTTON(GAMEPAD_SDL_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
+
+static uint16_t SdlKeys(uint32_t buttons, int16_t x, int16_t y)
+{
+    struct GamepadSdlState state = {buttons, x, y, 0};
+    struct GamepadInput in = Gamepad_FromSdl(&state);
+
+    return Gamepad_MapKeys(&in).keys;
+}
+
+MT_TEST(an_sdl_pad_s_buttons_are_the_xinput_pad_s)
+{
+    struct { int sdl; uint16_t xinput; } table[] = {
+        {GAMEPAD_SDL_A, GAMEPAD_A}, {GAMEPAD_SDL_B, GAMEPAD_B}, {GAMEPAD_SDL_X, GAMEPAD_X}, {GAMEPAD_SDL_Y, GAMEPAD_Y},
+        {GAMEPAD_SDL_BACK, GAMEPAD_BACK}, {GAMEPAD_SDL_START, GAMEPAD_START},
+        {GAMEPAD_SDL_LEFT_SHOULDER, GAMEPAD_LEFT_SHOULDER}, {GAMEPAD_SDL_RIGHT_SHOULDER, GAMEPAD_RIGHT_SHOULDER},
+        {GAMEPAD_SDL_DPAD_UP, GAMEPAD_DPAD_UP}, {GAMEPAD_SDL_DPAD_DOWN, GAMEPAD_DPAD_DOWN},
+        {GAMEPAD_SDL_DPAD_LEFT, GAMEPAD_DPAD_LEFT}, {GAMEPAD_SDL_DPAD_RIGHT, GAMEPAD_DPAD_RIGHT},
+    };
+
+    for (unsigned i = 0; i < sizeof(table) / sizeof(table[0]); i++)
+    {
+        struct GamepadSdlState state = {1u << table[i].sdl, 0, 0, 0};
+        struct GamepadInput xinput = {table[i].xinput, 0, 0, 0};
+        struct GamepadInput in = Gamepad_FromSdl(&state);
+
+        MT_EQ(in.buttons, table[i].xinput);
+        MT_EQ(Gamepad_MapKeys(&in).keys, Gamepad_MapKeys(&xinput).keys);
+        MT_EQ(Gamepad_MapKeys(&in).details, Gamepad_MapKeys(&xinput).details);
+    }
+    MT_EQ(SdlKeys(1u << GAMEPAD_SDL_A, 0, 0), 0x0001);            // A (a PlayStation pad's cross) is A
+    MT_EQ(SdlKeys(1u << GAMEPAD_SDL_B, 0, 0), 0x0002);            // B (circle) is B
+    MT_EQ(SdlKeys(1u << GAMEPAD_SDL_X, 0, 0), 0x0002);            // X (square) is B too, as on an Xbox pad
+    MT_EQ(SdlKeys(1u << GAMEPAD_SDL_Y, 0, 0), 0);                 // Y (triangle): the details key, no game button
+    MT_EQ(SdlKeys((1u << GAMEPAD_SDL_GUIDE) | (1u << GAMEPAD_SDL_LEFT_STICK) | (1u << GAMEPAD_SDL_RIGHT_STICK), 0, 0), 0);
+    MT_EQ(SdlKeys(0xFFFF8000u, 0, 0), 0);                         // SDL's later buttons (touchpad, paddles): nothing
+}
+
+MT_TEST(an_sdl_pad_s_stick_down_is_down)
+{
+    MT_EQ(SdlKeys(0, 0, 32767), 0x0080);      // SDL: down is positive
+    MT_EQ(SdlKeys(0, 0, -32768), 0x0040);     // up (the most negative value, which XInput's up cannot hold, is up)
+    MT_EQ(SdlKeys(0, -32768, 0), 0x0020);
+    MT_EQ(SdlKeys(0, 32767, 0), 0x0010);
+    MT_EQ(SdlKeys(0, 16383, -16383), 0);      // under half: nothing
+    MT_EQ(SdlKeys(0, 16384, 16384), 0x0010 | 0x0080);
+
+    struct GamepadSdlState trigger = {0, 0, 0, 32767};
+    MT_EQ(Gamepad_FromSdl(&trigger).rightTrigger, 255);
+    MT_EQ(SdlKeys(0, 0, 0), 0);
+}
+
+MT_TEST(random_sdl_input_never_sets_a_bit_outside_the_ten_game_keys)
+{
+    srand(11);
+    for (int i = 0; i < 20000; i++)
+    {
+        struct GamepadSdlState state = {(uint32_t)rand() * 2654435761u, (int16_t)rand(), (int16_t)rand(), (int16_t)rand()};
+        struct GamepadInput in = Gamepad_FromSdl(&state);
+
+        MT_EQ(Gamepad_MapKeys(&in).keys & ~0x03FF, 0);
+    }
+}
+
 int main(void)
 {
     MT_RUN(all_4096_button_combinations_match_the_old_arithmetic);
@@ -110,5 +192,8 @@ int main(void)
     MT_RUN(the_left_stick_is_a_dpad_beyond_half_deflection);
     MT_RUN(the_right_trigger_no_longer_speeds_the_game_up);
     MT_RUN(random_input_never_sets_a_bit_outside_the_ten_game_keys);
+    MT_RUN(an_sdl_pad_s_buttons_are_the_xinput_pad_s);
+    MT_RUN(an_sdl_pad_s_stick_down_is_down);
+    MT_RUN(random_sdl_input_never_sets_a_bit_outside_the_ten_game_keys);
     return MT_REPORT();
 }

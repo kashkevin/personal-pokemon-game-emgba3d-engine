@@ -36,3 +36,25 @@ struct GamepadKeys Gamepad_MapKeys(const struct GamepadInput *input)
     if (y >  GAMEPAD_STICK_THRESHOLD) out.keys |= KEY_UP;
     return out;
 }
+
+struct GamepadInput Gamepad_FromSdl(const struct GamepadSdlState *state)
+{
+    static const uint16_t sXInputBit[GAMEPAD_SDL_BUTTONS] = {
+        [GAMEPAD_SDL_A] = GAMEPAD_A, [GAMEPAD_SDL_B] = GAMEPAD_B, [GAMEPAD_SDL_X] = GAMEPAD_X, [GAMEPAD_SDL_Y] = GAMEPAD_Y,
+        [GAMEPAD_SDL_BACK] = GAMEPAD_BACK, [GAMEPAD_SDL_START] = GAMEPAD_START,
+        [GAMEPAD_SDL_LEFT_SHOULDER] = GAMEPAD_LEFT_SHOULDER, [GAMEPAD_SDL_RIGHT_SHOULDER] = GAMEPAD_RIGHT_SHOULDER,
+        [GAMEPAD_SDL_DPAD_UP] = GAMEPAD_DPAD_UP, [GAMEPAD_SDL_DPAD_DOWN] = GAMEPAD_DPAD_DOWN,
+        [GAMEPAD_SDL_DPAD_LEFT] = GAMEPAD_DPAD_LEFT, [GAMEPAD_SDL_DPAD_RIGHT] = GAMEPAD_DPAD_RIGHT,
+    };
+    struct GamepadInput out = {0, 0, 0, 0};
+
+    for (int i = 0; i < GAMEPAD_SDL_BUTTONS; i++)
+    {
+        if (state->buttons & (1u << i))
+            out.buttons |= sXInputBit[i];
+    }
+    out.stickX = state->leftX;
+    out.stickY = state->leftY == INT16_MIN ? INT16_MAX : (int16_t)-state->leftY;
+    out.rightTrigger = state->rightTrigger > 0 ? (uint8_t)(state->rightTrigger >> 7) : 0;
+    return out;
+}

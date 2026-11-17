@@ -138,6 +138,23 @@ static struct KeyQueue sPadQueue; // the same for the gamepad
 u16 GetXInputKeys(void);
 static bool sPadConnected;        // the last read found a pad (the extra read between frames is made only then)
 #endif
+#ifndef __ANDROID__
+// Controllers XInput does not read (a PlayStation or Switch Pro controller, most other USB and Bluetooth pads) through SDL's
+// game controller support: the first one SDL can map, read when XInput has no controller (Windows: an Xbox controller is
+// XInput's, as before) and always elsewhere. PKMN_SDL_CONTROLLERS=0 leaves SDL's controller support off.
+static bool sSdlPadsOn;
+static SDL_GameController *sSdlPad;
+static SDL_JoystickID sSdlPadId = -1;
+static struct GamepadSdlState sSdlPadState; // its buttons and stick as its events left them (each event a key queue step)
+static void SdlPads_Start(void);
+static void SdlPads_Event(const SDL_Event *event);
+static struct GamepadKeys SdlPads_Keys(void);
+#endif
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+static void TestPad_Start(void);
+static bool TestPad_Active(void);
+static void TestPad_Hold(u16 keys);
+#endif
 
 // Every change of the keyboard's buttons goes through here: the game frame takes them one step at a time, so a tap that
 // begins and ends between two frames still reaches the game (Update 28).
@@ -753,6 +770,11 @@ int main(int argc, char **argv)
         if (SDL_IsGameController(i))
             androidController = SDL_GameControllerOpen(i);
     }
+#else
+    SdlPads_Start();
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+    TestPad_Start();
+#endif
 #endif
 
 #ifdef __ANDROID__
@@ -1151,7 +1173,10 @@ int main(int argc, char **argv)
                         keys = NativeUi_FilterKeys(keys);
 #endif
 #if defined(DIORAMA_BATTLE_ENV_TEST)
-                        keys = DioramaBattleEnvTest_FilterKeys(keys, SDL_GetTicks());
+                        if (TestPad_Active())
+                            TestPad_Hold(DioramaBattleEnvTest_FilterKeys(0, SDL_GetTicks())); // the game reads them next frame
+                        else
+                            keys = DioramaBattleEnvTest_FilterKeys(keys, SDL_GetTicks());
 #endif
                         // In multiplayer the reset chord reaches the game only when
                         // its native reset handler has been offered it.
@@ -3396,6 +3421,15 @@ void ProcessEvents(void)
             break;
         }
 #endif
+#ifndef __ANDROID__
+        case SDL_CONTROLLERDEVICEADDED:
+        case SDL_CONTROLLERDEVICEREMOVED:
+        case SDL_CONTROLLERBUTTONDOWN:
+        case SDL_CONTROLLERBUTTONUP:
+        case SDL_CONTROLLERAXISMOTION:
+            SdlPads_Event(&event);
+            break;
+#endif
 #ifdef __ANDROID__
         case SDL_CONTROLLERDEVICEADDED:
             if (androidController == NULL && SDL_IsGameController(event.cdevice.which))
@@ -3766,6 +3800,115 @@ static int SelfTestKeybinds(void)
         ExpectKeys("pad Y is the details key (and no GBA button)", Gamepad_MapKeys(&pad).details && Gamepad_MapKeys(&pad).keys == 0);
     }
 
+#ifndef __ANDROID__
+    // SDL's controllers: a PlayStation or Switch Pro pad, which XInput does not read, through SDL's game controller support -
+    // here a virtual controller SDL maps like any other, through the real event loop (ProcessEvents, Platform_GetKeyInput).
+    printf("SDL controllers (a virtual one)\n");
+    remove(sConfigPath);
+    ReadConfigFile(); // the default keys again
+    SdlPads_Start();
+    {
+        SDL_VirtualJoystickDesc desc;
+        int index = -1;
+
+        SDL_zero(desc);
+        desc.version = SDL_VIRTUAL_JOYSTICK_DESC_VERSION;
+        desc.type = SDL_JOYSTICK_TYPE_GAMECONTROLLER;
+        desc.naxes = SDL_CONTROLLER_AXIS_MAX;
+        desc.nbuttons = SDL_CONTROLLER_BUTTON_MAX;
+        desc.name = "Self-test pad";
+        if (sSdlPadsOn)
+            index = SDL_JoystickAttachVirtualEx(&desc);
+        ExpectKeys("SDL's controller support started and a virtual controller attached", index >= 0);
+        ProcessEvents(); // its device-added event: the game opens it
+        ExpectKeys("the game opened it (the first controller SDL maps)", sSdlPad != NULL);
+        if (sSdlPad != NULL)
+        {
+            SDL_Joystick *stick = SDL_GameControllerGetJoystick(sSdlPad);
+#define PAD_BUTTON(b, down) (SDL_JoystickSetVirtualButton(stick, SDL_CONTROLLER_BUTTON_##b, (down) ? SDL_PRESSED : SDL_RELEASED), ProcessEvents())
+#define PAD_AXIS(a, value) (SDL_JoystickSetVirtualAxis(stick, SDL_CONTROLLER_AXIS_##a, (value)), ProcessEvents())
+
+            PAD_BUTTON(A, true);
+            ExpectKeys("pad A (a PlayStation pad's cross) presses A", Platform_GetKeyInput() == A_BUTTON);
+            PAD_BUTTON(A, false);
+            ExpectKeys("released, nothing", Platform_GetKeyInput() == 0);
+            PAD_BUTTON(B, true);
+            ExpectKeys("pad B (circle) is B", Platform_GetKeyInput() == B_BUTTON);
+            PAD_BUTTON(B, false);
+            ExpectKeys("released", Platform_GetKeyInput() == 0);
+            PAD_BUTTON(X, true);
+            ExpectKeys("pad X (square) is B too, as on an Xbox pad", Platform_GetKeyInput() == B_BUTTON);
+            PAD_BUTTON(X, false);
+            ExpectKeys("released", Platform_GetKeyInput() == 0);
+            PAD_BUTTON(START, true);
+            PAD_BUTTON(BACK, true);
+            ExpectKeys("pad Start is Start and Back (Share, -) is Select", Platform_GetKeyInput() == (START_BUTTON | SELECT_BUTTON));
+            PAD_BUTTON(START, false);
+            PAD_BUTTON(BACK, false);
+            ExpectKeys("released", Platform_GetKeyInput() == 0);
+            PAD_BUTTON(LEFTSHOULDER, true);
+            PAD_BUTTON(RIGHTSHOULDER, true);
+            ExpectKeys("pad shoulders are L and R", Platform_GetKeyInput() == (L_BUTTON | R_BUTTON));
+            PAD_BUTTON(LEFTSHOULDER, false);
+            PAD_BUTTON(RIGHTSHOULDER, false);
+            ExpectKeys("released", Platform_GetKeyInput() == 0);
+            PAD_BUTTON(DPAD_UP, true);
+            PAD_BUTTON(DPAD_LEFT, true);
+            ExpectKeys("pad d-pad up and left", Platform_GetKeyInput() == (DPAD_UP | DPAD_LEFT));
+            PAD_BUTTON(DPAD_UP, false);
+            PAD_BUTTON(DPAD_LEFT, false);
+            ExpectKeys("released", Platform_GetKeyInput() == 0);
+            PAD_BUTTON(DPAD_DOWN, true);
+            PAD_BUTTON(DPAD_RIGHT, true);
+            ExpectKeys("pad d-pad down and right", Platform_GetKeyInput() == (DPAD_DOWN | DPAD_RIGHT));
+            PAD_BUTTON(DPAD_DOWN, false);
+            PAD_BUTTON(DPAD_RIGHT, false);
+            ExpectKeys("released", Platform_GetKeyInput() == 0);
+            PAD_BUTTON(Y, true);
+            PAD_BUTTON(GUIDE, true);
+            ExpectKeys("pad Y (triangle: the details key) and the guide button press no game button", Platform_GetKeyInput() == 0);
+            PAD_BUTTON(Y, false);
+            PAD_BUTTON(GUIDE, false);
+            PAD_AXIS(LEFTY, 32767);
+            ExpectKeys("pad stick down (positive in SDL) is Down", Platform_GetKeyInput() == DPAD_DOWN);
+            PAD_AXIS(LEFTY, -32768);
+            ExpectKeys("pad stick up is Up", Platform_GetKeyInput() == DPAD_UP);
+            PAD_AXIS(LEFTY, 0);
+            ExpectKeys("the stick back in the middle, nothing", Platform_GetKeyInput() == 0);
+            PAD_AXIS(LEFTX, -32768);
+            ExpectKeys("pad stick left is Left", Platform_GetKeyInput() == DPAD_LEFT);
+            PAD_AXIS(LEFTX, 12000);
+            ExpectKeys("pad stick barely right (under half): nothing", Platform_GetKeyInput() == 0);
+            PAD_AXIS(LEFTX, 20000);
+            ExpectKeys("pad stick past half right is Right", Platform_GetKeyInput() == DPAD_RIGHT);
+            PAD_AXIS(LEFTX, 0);
+            ExpectKeys("the stick back in the middle, nothing", Platform_GetKeyInput() == 0);
+            PAD_BUTTON(A, true);
+            PAD_BUTTON(A, false);
+            ExpectKeys("a pad tap between two frames is down for one frame", Platform_GetKeyInput() == A_BUTTON);
+            ExpectKeys("and up the next", Platform_GetKeyInput() == 0);
+            KeyEvent(SDLK_z, true, 0);
+            PAD_BUTTON(DPAD_DOWN, true);
+            ExpectKeys("the keyboard and the pad together (Z and the d-pad)", Platform_GetKeyInput() == (A_BUTTON | DPAD_DOWN));
+            KeyEvent(SDLK_z, false, 0);
+            PAD_BUTTON(DPAD_DOWN, false);
+            ExpectKeys("both released", Platform_GetKeyInput() == 0);
+            PAD_BUTTON(START, true);
+            ExpectKeys("Start held", Platform_GetKeyInput() == START_BUTTON);
+            SDL_JoystickDetachVirtual(index);
+            index = -1;
+            ProcessEvents(); // its device-removed event
+            ExpectKeys("the controller unplugged while Start was held: the game lets it go, nothing stays held",
+                       sSdlPad == NULL && Platform_GetKeyInput() == 0 && Platform_GetKeyInput() == 0);
+#undef PAD_BUTTON
+#undef PAD_AXIS
+        }
+        if (index >= 0)
+            SDL_JoystickDetachVirtual(index);
+        ProcessEvents();
+    }
+#endif
+
     remove(sConfigPath);
     printf("selftest-keybinds: %d checks, %d failed\n", sKeyChecks, sKeyFailures);
     SDL_Quit();
@@ -3846,9 +3989,7 @@ static DWORD LoadedXInputGetState(DWORD index, XINPUT_STATE *state)
     return sXInputGetState != NULL ? sXInputGetState(index, state) : ERROR_DEVICE_NOT_CONNECTED;
 }
 
-#ifdef ENABLE_NATIVE_UI
 static bool sXInputDetails; // the pad's Y: no game button; the native UI's details view
-#endif
 
 u16 GetXInputKeys(void)
 {
@@ -3858,9 +3999,7 @@ u16 GetXInputKeys(void)
     DWORD dwResult = LoadedXInputGetState(0, &state);
     u16 xinputKeys = 0;
     sPadConnected = dwResult == ERROR_SUCCESS;
-#ifdef ENABLE_NATIVE_UI
     sXInputDetails = false;
-#endif
 
     if (dwResult == ERROR_SUCCESS)
     {
@@ -3870,9 +4009,7 @@ u16 GetXInputKeys(void)
         struct GamepadKeys mapped = Gamepad_MapKeys(&input);
 
         xinputKeys = mapped.keys;
-#ifdef ENABLE_NATIVE_UI
         sXInputDetails = mapped.details;
-#endif
 
         // Update 30: no player-facing speed-up (the right trigger and the Space key used to run the game 5x faster).
     }
@@ -3880,6 +4017,157 @@ u16 GetXInputKeys(void)
     return xinputKeys;
 }
 #endif // _WIN32
+
+#ifndef __ANDROID__
+static const char *SdlPadKind(SDL_GameController *pad)
+{
+    switch (SDL_GameControllerGetType(pad))
+    {
+    case SDL_CONTROLLER_TYPE_XBOX360:
+    case SDL_CONTROLLER_TYPE_XBOXONE:
+        return "Xbox";
+    case SDL_CONTROLLER_TYPE_PS3:
+    case SDL_CONTROLLER_TYPE_PS4:
+    case SDL_CONTROLLER_TYPE_PS5:
+        return "PlayStation";
+    case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO:
+    case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+    case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+    case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+        return "Nintendo Switch";
+    case SDL_CONTROLLER_TYPE_VIRTUAL:
+        return "virtual";
+    default:
+        return "other";
+    }
+}
+
+static void SdlPads_Open(int deviceIndex)
+{
+    if (!SDL_IsGameController(deviceIndex))
+        return;
+    sSdlPad = SDL_GameControllerOpen(deviceIndex);
+    if (sSdlPad == NULL)
+    {
+        SDL_Log("Controllers: %s could not be opened: %s", SDL_GameControllerNameForIndex(deviceIndex), SDL_GetError());
+        return;
+    }
+    sSdlPadId = SDL_JoystickInstanceID(SDL_GameControllerGetJoystick(sSdlPad));
+    SDL_zero(sSdlPadState);
+    for (int button = 0; button < GAMEPAD_SDL_BUTTONS; button++)
+    {
+        if (SDL_GameControllerGetButton(sSdlPad, (SDL_GameControllerButton)button))
+            sSdlPadState.buttons |= 1u << button;
+    }
+    sSdlPadState.leftX = SDL_GameControllerGetAxis(sSdlPad, SDL_CONTROLLER_AXIS_LEFTX);
+    sSdlPadState.leftY = SDL_GameControllerGetAxis(sSdlPad, SDL_CONTROLLER_AXIS_LEFTY);
+    sSdlPadState.rightTrigger = SDL_GameControllerGetAxis(sSdlPad, SDL_CONTROLLER_AXIS_TRIGGERRIGHT);
+#ifdef _WIN32
+    SDL_Log("Controllers: %s (%s) connected: read through SDL while XInput has no controller",
+            SDL_GameControllerName(sSdlPad), SdlPadKind(sSdlPad));
+#else
+    SDL_Log("Controllers: %s (%s) connected", SDL_GameControllerName(sSdlPad), SdlPadKind(sSdlPad));
+#endif
+}
+
+static void SdlPads_Start(void)
+{
+    const char *setting = SDL_getenv("PKMN_SDL_CONTROLLERS");
+
+    if (setting != NULL && setting[0] == '0')
+    {
+        SDL_Log("Controllers: SDL's controller support off (PKMN_SDL_CONTROLLERS=0)");
+        return;
+    }
+    // Read whatever window is in front, as XInput's controller always was (a game started from the launcher may open
+    // behind it); SDL's default would drop a press while another window has the focus.
+    SDL_SetHint(SDL_HINT_JOYSTICK_ALLOW_BACKGROUND_EVENTS, "1");
+    if (SDL_InitSubSystem(SDL_INIT_GAMECONTROLLER) != 0)
+    {
+        SDL_Log("Controllers: SDL's controller support could not start: %s", SDL_GetError());
+        return;
+    }
+    sSdlPadsOn = true;
+    for (int i = 0; i < SDL_NumJoysticks() && sSdlPad == NULL; i++)
+        SdlPads_Open(i);
+}
+
+// This controller is the one the game reads: on Windows only while XInput has none.
+static bool SdlPads_Read(void)
+{
+#ifdef _WIN32
+    return sSdlPad != NULL && !sPadConnected;
+#else
+    return sSdlPad != NULL;
+#endif
+}
+
+static struct GamepadKeys SdlPads_Keys(void)
+{
+    struct GamepadKeys none = {0, false};
+    struct GamepadInput input;
+
+    if (sSdlPad == NULL)
+        return none;
+    input = Gamepad_FromSdl(&sSdlPadState);
+    return Gamepad_MapKeys(&input);
+}
+
+static void SdlPads_Event(const SDL_Event *event)
+{
+    switch (event->type)
+    {
+    case SDL_CONTROLLERDEVICEADDED:
+        if (sSdlPadsOn && sSdlPad == NULL)
+            SdlPads_Open(event->cdevice.which);
+        break;
+    case SDL_CONTROLLERDEVICEREMOVED:
+        if (sSdlPad == NULL || event->cdevice.which != sSdlPadId)
+            return;
+        SDL_Log("Controllers: %s disconnected", SDL_GameControllerName(sSdlPad));
+        SDL_GameControllerClose(sSdlPad);
+        sSdlPad = NULL;
+        sSdlPadId = -1;
+        SDL_zero(sSdlPadState); // nothing it held stays held
+        for (int i = 0; i < SDL_NumJoysticks() && sSdlPad == NULL; i++)
+            SdlPads_Open(i);    // another one still connected is read from now
+        break;
+    case SDL_CONTROLLERBUTTONDOWN:
+    case SDL_CONTROLLERBUTTONUP:
+        if (sSdlPad == NULL || event->cbutton.which != sSdlPadId || event->cbutton.button >= 32)
+            return;
+        if (event->type == SDL_CONTROLLERBUTTONDOWN)
+            sSdlPadState.buttons |= 1u << event->cbutton.button;
+        else
+            sSdlPadState.buttons &= ~(1u << event->cbutton.button);
+        break;
+    case SDL_CONTROLLERAXISMOTION:
+        if (sSdlPad == NULL || event->caxis.which != sSdlPadId)
+            return;
+        if (event->caxis.axis == SDL_CONTROLLER_AXIS_LEFTX)
+            sSdlPadState.leftX = event->caxis.value;
+        else if (event->caxis.axis == SDL_CONTROLLER_AXIS_LEFTY)
+            sSdlPadState.leftY = event->caxis.value;
+        else if (event->caxis.axis == SDL_CONTROLLER_AXIS_TRIGGERRIGHT)
+            sSdlPadState.rightTrigger = event->caxis.value;
+        else
+            return;
+        break;
+    default:
+        return;
+    }
+    // A press and release between two frames still reaches the game (key_queue.h), as the keyboard's
+    if (!sPcMenu.open && SdlPads_Read())
+        KeyQueue_Set(&sPadQueue, SdlPads_Keys().keys);
+}
+#endif // !__ANDROID__
+
+#define SAME_PAD_BUTTON(ours, sdl) _Static_assert((int)(ours) == (int)(sdl), "SDL2's controller button numbering: " #sdl)
+SAME_PAD_BUTTON(GAMEPAD_SDL_A, SDL_CONTROLLER_BUTTON_A);
+SAME_PAD_BUTTON(GAMEPAD_SDL_Y, SDL_CONTROLLER_BUTTON_Y);
+SAME_PAD_BUTTON(GAMEPAD_SDL_START, SDL_CONTROLLER_BUTTON_START);
+SAME_PAD_BUTTON(GAMEPAD_SDL_LEFT_SHOULDER, SDL_CONTROLLER_BUTTON_LEFTSHOULDER);
+SAME_PAD_BUTTON(GAMEPAD_SDL_DPAD_RIGHT, SDL_CONTROLLER_BUTTON_DPAD_RIGHT);
 
 u16 Platform_GetKeyInput(void)
 {
@@ -3891,20 +4179,88 @@ u16 Platform_GetKeyInput(void)
     // The keyboard (and the pad) as the events left them since the last frame, one step at a time: KeyQueue_Take is this
     // frame's keys; a tap shorter than a frame is one frame down and the next up.
     u16 keyboard = KeyQueue_Take(&sKeyQueue);
+#ifdef __ANDROID__
+    return keyboard | controllerKeys | controllerAxisKeys;
+#else
+    // The pad: XInput's controller (Windows), else SDL's (SdlPads_*)
+    struct GamepadKeys pad;
 #ifdef _WIN32
-    KeyQueue_Set(&sPadQueue, GetXInputKeys());
+    u16 xinputKeys = GetXInputKeys();
+
+    if (sPadConnected)
+    {
+        pad.keys = xinputKeys;
+        pad.details = sXInputDetails;
+    }
+    else
+#endif
+        pad = SdlPads_Keys();
+    KeyQueue_Set(&sPadQueue, pad.keys);
     u16 gamepadKeys = KeyQueue_Take(&sPadQueue);
 #ifdef ENABLE_NATIVE_UI
     NativeUi_NotePadKeys(gamepadKeys); // the prompts show the pad's buttons
-    NativeUi_NotePadDetails(sXInputDetails);
+    NativeUi_NotePadDetails(pad.details);
 #endif
     return gamepadKeys | keyboard;
-#elif defined(__ANDROID__)
-    return keyboard | controllerKeys | controllerAxisKeys;
 #endif
-
-    return keyboard;
 }
+
+#if defined(DIORAMA_BATTLE_ENV_TEST)
+// Test builds only (never a player's): PKMN_TEST_PAD=1 (=stick: the directions on the left stick) hands the test driver's
+// keys to the game through a virtual SDL controller instead of straight to the game, so the game reads them as a player's
+// PlayStation or Switch pad (SdlPads_*, the key queue), a frame later.
+static SDL_Joystick *sTestPad;
+static bool sTestPadStick;
+
+static void TestPad_Start(void)
+{
+    const char *setting = SDL_getenv("PKMN_TEST_PAD");
+    SDL_VirtualJoystickDesc desc;
+    int index;
+
+    if (setting == NULL || setting[0] == '\0' || setting[0] == '0')
+        return;
+    sTestPadStick = SDL_strcmp(setting, "stick") == 0;
+    SDL_zero(desc);
+    desc.version = SDL_VIRTUAL_JOYSTICK_DESC_VERSION;
+    desc.type = SDL_JOYSTICK_TYPE_GAMECONTROLLER;
+    desc.naxes = SDL_CONTROLLER_AXIS_MAX;
+    desc.nbuttons = SDL_CONTROLLER_BUTTON_MAX;
+    desc.name = "Test pad";
+    index = sSdlPadsOn ? SDL_JoystickAttachVirtualEx(&desc) : -1;
+    sTestPad = index >= 0 ? SDL_JoystickOpen(index) : NULL;
+    SDL_Log("Test pad: %s", sTestPad != NULL ? (sTestPadStick ? "the test keys through a virtual controller, the directions on its stick"
+                                                              : "the test keys through a virtual controller")
+                                             : "no virtual controller (SDL's controller support is off)");
+}
+
+static bool TestPad_Active(void)
+{
+    return sTestPad != NULL;
+}
+
+static void TestPad_Hold(u16 keys)
+{
+    static const struct { u16 key; SDL_GameControllerButton button; } sButtons[] = {
+        {A_BUTTON, SDL_CONTROLLER_BUTTON_A}, {B_BUTTON, SDL_CONTROLLER_BUTTON_B},
+        {START_BUTTON, SDL_CONTROLLER_BUTTON_START}, {SELECT_BUTTON, SDL_CONTROLLER_BUTTON_BACK},
+        {L_BUTTON, SDL_CONTROLLER_BUTTON_LEFTSHOULDER}, {R_BUTTON, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER},
+        {DPAD_UP, SDL_CONTROLLER_BUTTON_DPAD_UP}, {DPAD_DOWN, SDL_CONTROLLER_BUTTON_DPAD_DOWN},
+        {DPAD_LEFT, SDL_CONTROLLER_BUTTON_DPAD_LEFT}, {DPAD_RIGHT, SDL_CONTROLLER_BUTTON_DPAD_RIGHT},
+    };
+    u16 buttons = sTestPadStick ? keys & ~(DPAD_UP | DPAD_DOWN | DPAD_LEFT | DPAD_RIGHT) : keys;
+
+    for (unsigned int i = 0; i < ARRAY_COUNT(sButtons); i++)
+        SDL_JoystickSetVirtualButton(sTestPad, sButtons[i].button, (buttons & sButtons[i].key) ? SDL_PRESSED : SDL_RELEASED);
+    SDL_JoystickSetVirtualAxis(sTestPad, SDL_CONTROLLER_AXIS_LEFTX,
+                               !sTestPadStick ? 0 : (keys & DPAD_LEFT) ? -32768 : (keys & DPAD_RIGHT) ? 32767 : 0);
+    SDL_JoystickSetVirtualAxis(sTestPad, SDL_CONTROLLER_AXIS_LEFTY,
+                               !sTestPadStick ? 0 : (keys & DPAD_UP) ? -32768 : (keys & DPAD_DOWN) ? 32767 : 0);
+    // Its events now, as a real controller sends one per change: SDL samples a virtual one only when it is updated, and
+    // two game frames between two event polls would otherwise leave only the second frame's buttons
+    SDL_JoystickUpdate();
+}
+#endif
 
 #ifndef ENABLE_DIORAMA
 // KNOWN_ISSUES MS-125, the Classic 2D game: a notice drawn over the GBA picture with the game's own font (the 3D game

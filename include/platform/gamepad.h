@@ -1,8 +1,8 @@
 #ifndef GUARD_PLATFORM_GAMEPAD_H
 #define GUARD_PLATFORM_GAMEPAD_H
 
-// The Windows gamepad (XInput) mapped to the GBA's keys, as a pure function so it can be tested
-// on any machine. The bit values are XInput's XINPUT_GAMEPAD_* masks and the GBA key register's bits.
+// The gamepad (XInput on Windows; SDL's controllers where XInput has none) mapped to the GBA's keys, as pure functions so
+// they can be tested on any machine. The bit values are XInput's XINPUT_GAMEPAD_* masks and the GBA key register's bits.
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -36,5 +36,28 @@ struct GamepadKeys
 };
 
 struct GamepadKeys Gamepad_MapKeys(const struct GamepadInput *input);
+
+// Controllers XInput does not read (a PlayStation or Switch Pro controller, most other USB and Bluetooth pads) through
+// SDL's game controller support: SDL2's button numbering (SDL_GameControllerButton, fixed for SDL2; sdl2.c checks it at
+// compile time), as bits of GamepadSdlState.buttons. SDL names the face buttons by position (A at the bottom: an Xbox
+// pad's A, a PlayStation pad's cross), except a Nintendo pad's, which it names by their labels (its A is the right one).
+enum
+{
+    GAMEPAD_SDL_A, GAMEPAD_SDL_B, GAMEPAD_SDL_X, GAMEPAD_SDL_Y, GAMEPAD_SDL_BACK, GAMEPAD_SDL_GUIDE, GAMEPAD_SDL_START,
+    GAMEPAD_SDL_LEFT_STICK, GAMEPAD_SDL_RIGHT_STICK, GAMEPAD_SDL_LEFT_SHOULDER, GAMEPAD_SDL_RIGHT_SHOULDER,
+    GAMEPAD_SDL_DPAD_UP, GAMEPAD_SDL_DPAD_DOWN, GAMEPAD_SDL_DPAD_LEFT, GAMEPAD_SDL_DPAD_RIGHT,
+    GAMEPAD_SDL_BUTTONS
+};
+
+struct GamepadSdlState
+{
+    uint32_t buttons;        // bit n: SDL button n held
+    int16_t leftX, leftY;    // the left stick as SDL reports it: -32768..32767, down is positive
+    int16_t rightTrigger;    // 0..32767
+};
+
+// The SDL controller in XInput's terms, for Gamepad_MapKeys: the same buttons do the same things on every pad (the
+// guide button and the stick clicks nothing, as on XInput), the stick's up positive.
+struct GamepadInput Gamepad_FromSdl(const struct GamepadSdlState *state);
 
 #endif // GUARD_PLATFORM_GAMEPAD_H
