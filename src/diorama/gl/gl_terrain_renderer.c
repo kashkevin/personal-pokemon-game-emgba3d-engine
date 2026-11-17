@@ -2957,6 +2957,11 @@ bool DioramaGLTerrain_Init(void)
         sNoSuperseded = value != NULL && value[0] == '0';
         value = SDL_getenv("PKMN_DIORAMA_ANIMATED_WAITS");
         sAnimatedBuildsAll = value != NULL && value[0] == '0';
+        /* the owner's #71 C, a preview: the bumpy and muddy slopes as smooth ramps (rules.h gDioramaSmoothSlopes) */
+        value = SDL_getenv("PKMN_DIORAMA_SMOOTH_SLOPES");
+        gDioramaSmoothSlopes = value != NULL && value[0] == '1';
+        if (gDioramaSmoothSlopes)
+            SDL_Log("Diorama: the bumpy and muddy slopes as smooth ramps (PKMN_DIORAMA_SMOOTH_SLOPES=1, a preview)");
     }
     memset(sChunks, 0, sizeof(sChunks));
     memset(&sMetrics, 0, sizeof(sMetrics));

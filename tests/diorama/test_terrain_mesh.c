@@ -803,6 +803,58 @@ static void TestCliffFaceBandsAndRamp(void)
     assert(mesh.bounds.maxY == 1.0f);
 }
 
+/* Smooth ramps (the owner's #71 C preview, gDioramaSmoothSlopes): a bumpy slope one sloped quad from its low edge
+ * to its high edge, open sides closed by triangles, no step's top between; off, the mesh as before. */
+static void TestSmoothRamp(void)
+{
+    struct DioramaTerrainChunkInput input;
+    struct DioramaTerrainMesh mesh;
+    struct DioramaTerrainCell *center;
+    uint64_t steppedHash;
+    uint32_t steppedTops;
+    uint32_t i;
+    bool highNorth = false;
+    bool lowSouth = false;
+
+    InitInput(&input, 3, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];   /* map (3, 3): x 2.5-3.5, z -2.5 to -3.5 */
+    center->shape = DIORAMA_SHAPE_STAIRS;
+    center->archetype = DIORAMA_ARCHETYPE_STAIRS_N;
+    center->featureHeight = 1.0f;
+    center->behavior = MB_BUMPY_SLOPE;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    steppedHash = mesh.geometryHash;
+    steppedTops = mesh.topFaceCount;
+
+    gDioramaSmoothSlopes = true;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.geometryHash != steppedHash);
+    assert(mesh.topFaceCount < steppedTops);
+    assert(mesh.bounds.maxY == 1.0f);
+    for (i = 0; i < mesh.vertexCount; i++)
+    {
+        const struct DioramaTerrainVertex *v = &sVertices[i];
+
+        /* no step's top: the ramp, the ground and the triangles' corners only */
+        assert(v->y == 0.0f || v->y == 1.0f || v->y < 0.0f);
+        if (v->y == 1.0f && v->z == -2.5f && (v->x == 2.5f || v->x == 3.5f))
+            highNorth = true;
+        if (v->y == 0.0f && v->z == -3.5f && (v->x == 2.5f || v->x == 3.5f) && v->shade == 1.0f)
+            lowSouth = true;
+    }
+    assert(highNorth && lowSouth);
+
+    gDioramaSmoothSlopes = false;
+    InitInput(&input, 3, MB_NORMAL);
+    center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
+    center->shape = DIORAMA_SHAPE_STAIRS;
+    center->archetype = DIORAMA_ARCHETYPE_STAIRS_N;
+    center->featureHeight = 1.0f;
+    center->behavior = MB_BUMPY_SLOPE;
+    assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
+    assert(mesh.geometryHash == steppedHash);
+}
+
 static void TestCliffBaseCornersAndHeightTransition(void)
 {
     struct DioramaTerrainChunkInput input;
@@ -2124,6 +2176,7 @@ int main(void)
     TestBridgeHasTwoSurfaces();
     TestStairsAndDescendingStairwell();
     TestCliffFaceBandsAndRamp();
+    TestSmoothRamp();
     TestCliffBaseCornersAndHeightTransition();
     TestMountainArtworkMask();
     TestTerraceArtworkCourse();

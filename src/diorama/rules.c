@@ -1394,6 +1394,15 @@ float DioramaRules_DefaultGroundHeight(uint8_t behavior)
     return 0.0f;
 }
 
+bool gDioramaSmoothSlopes;
+
+bool DioramaRules_IsSmoothRamp(uint8_t archetype, uint8_t behavior)
+{
+    return gDioramaSmoothSlopes
+        && archetype >= DIORAMA_ARCHETYPE_STAIRS_N && archetype <= DIORAMA_ARCHETYPE_STAIRS_DOWN_W
+        && (behavior == MB_MUDDY_SLOPE || behavior == MB_BUMPY_SLOPE);
+}
+
 float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
                                  float groundHeight, float featureHeight,
                                  uint8_t pixelX, uint8_t pixelY)
@@ -1417,13 +1426,17 @@ float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
         coordinate = DIORAMA_BUILDING_PIXELS_PER_CELL - 1 - coordinate;
     /* The Mach Bike's muddy slopes climb in one-pixel steps; stairs and the Acro Bike's bumpy slopes in four-pixel
      * steps (one-pixel steps drew a bumpy slope's stones on slats, each riser a darker band: the owner's choice of
-     * 2026-11-17, docs/owner-decisions.md #71 B; a smooth slope, C, is later work). */
+     * 2026-11-17, docs/owner-decisions.md #71 B; a smooth slope, C, is the preview below, off by default). */
+    if (featureHeight == 0.0f)
+        featureHeight = 1.0f;
+    /* a smooth ramp (the owner's #71 C preview): the height at the pixel's centre on the even rise */
+    if (DioramaRules_IsSmoothRamp(archetype, behavior))
+        return groundHeight + (descending ? -1.0f : 1.0f)
+             * featureHeight * (coordinate + 0.5f) / DIORAMA_BUILDING_PIXELS_PER_CELL;
     if (behavior == MB_MUDDY_SLOPE)
         step = coordinate + 1;
     else
         step = (coordinate / 4 + 1) * 4;
-    if (featureHeight == 0.0f)
-        featureHeight = 1.0f;
     return groundHeight + (descending ? -1.0f : 1.0f)
          * featureHeight * step / DIORAMA_BUILDING_PIXELS_PER_CELL;
 }

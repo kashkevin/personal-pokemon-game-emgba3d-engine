@@ -472,6 +472,14 @@ float DioramaRules_DefaultGroundHeight(uint8_t behavior);
 float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
                                  float groundHeight, float featureHeight,
                                  uint8_t pixelX, uint8_t pixelY);
+/*
+ * Smooth slopes (the owner's #71 C, a preview, off unless PKMN_DIORAMA_SMOOTH_SLOPES=1): the Acro Bike's bumpy
+ * slopes and the Mach Bike's muddy slopes are one ramp a cell (terrain_mesh.c AppendRamps), and the profile rises
+ * evenly across it, so a sprite climbing it follows the ramp. Set before the first chunk is built.
+ */
+extern bool gDioramaSmoothSlopes;
+/* A cell drawn as a smooth ramp: a slope's behaviour on a stairs archetype, while gDioramaSmoothSlopes is on. */
+bool DioramaRules_IsSmoothRamp(uint8_t archetype, uint8_t behavior);
 float DioramaRules_ObjectGroundHeight(const struct DioramaResolvedCell *resolved,
                                        uint8_t cellElevation, uint8_t objectElevation,
                                        uint8_t behavior,

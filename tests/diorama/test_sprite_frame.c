@@ -245,6 +245,78 @@ static void TestResolvedPlateauPose(void)
     CHECK_CLOSE(pose.y, 2.0f);
 }
 
+/* A sprite crossing a smooth ramp (the owner's #71 C preview) stands on the ramp, not on a line between the cells'
+ * centres: a flat cell at 0, a bumpy slope climbing east from 0 to 1, a flat cell at 1. */
+static void TestSmoothRampPose(void)
+{
+    struct DioramaObjectSnapshot object = MakeObject();
+    struct DioramaSpritePose pose;
+    const int row = 2 * DIORAMA_GRID_WIDTH;
+    static const struct
+    {
+        uint8_t from;
+        uint8_t to;
+        int8_t offset;
+        float smooth;    /* the ground with smooth ramps */
+        float steps;     /* and without (four-pixel steps, #71 B: the ramp's centre at 0.75) */
+    } cases[] = {
+        {1, 2, -16, 0.0f, 0.0f},                                         /* on the flat cell's centre */
+        {1, 2, -12, (0.5f / 16.0f) / 2.0f, 0.1875f},                     /* half-way to the ramp's foot */
+        {1, 2, -8, 0.5f / 16.0f, 0.375f},                                /* at its foot: the ramp's first pixel */
+        {1, 2, 0, 8.5f / 16.0f, 0.75f},                                  /* the ramp's centre */
+        {2, 3, -9, 15.5f / 16.0f, 0.75f + 0.25f * 7.0f / 16.0f},         /* its last pixel */
+        {2, 3, -8, 15.5f / 16.0f, 0.875f},                               /* over its top edge */
+        {2, 3, -4, 1.0f + (15.5f / 16.0f - 1.0f) / 2.0f, 0.9375f},       /* on to the top */
+        {2, 3, 0, 1.0f, 1.0f},
+        {3, 2, 16, 1.0f, 1.0f},                                          /* back down, west */
+        {3, 2, 8, 15.5f / 16.0f, 0.875f},
+        {3, 2, 7, 15.5f / 16.0f, 0.75f + 0.25f * 7.0f / 16.0f},
+        {2, 1, 8, 0.5f / 16.0f, 0.375f},                                 /* off the foot, west */
+        {2, 1, 7, (0.5f / 16.0f) * 7.0f / 8.0f, 0.75f * 7.0f / 16.0f},
+    };
+    int smooth;
+    unsigned i;
+
+    memset(sResolvedCells, 0, sizeof(sResolvedCells));
+    sResolvedCells[row + 1].shape = DIORAMA_SHAPE_FLAT;
+    sResolvedCells[row + 2].shape = DIORAMA_SHAPE_STAIRS;
+    sResolvedCells[row + 2].archetype = DIORAMA_ARCHETYPE_STAIRS_E;
+    sResolvedCells[row + 2].featureHeight = 1.0f;
+    sResolvedCells[row + 3].shape = DIORAMA_SHAPE_FLAT;
+    sResolvedCells[row + 3].groundHeight = 1.0f;
+    sResolvedCells[row + 3].topHeight = 1.0f;
+    sSnapshot.cells[row + 2].behavior = MB_BUMPY_SLOPE;
+    for (smooth = 0; smooth < 2; smooth++)
+    {
+        gDioramaSmoothSlopes = smooth != 0;
+        for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
+        {
+            object.previousMapX = cases[i].from;
+            object.currentMapX = cases[i].to;
+            object.previousMapY = object.currentMapY = 2;
+            object.mapPixelOffsetX = cases[i].offset;
+            CHECK(DioramaSprite_BuildResolvedPose(&sSnapshot, sResolvedCells, sSnapshot.visibleCellCount,
+                                                   &object, &pose));
+            if (fabsf(pose.groundY - (smooth ? cases[i].smooth : cases[i].steps)) > 0.0001f)
+            {
+                fprintf(stderr, "test_sprite_frame.c: smooth ramp case %u (smooth %d): ground %.6f, expected %.6f\n",
+                        i, smooth, pose.groundY, smooth ? cases[i].smooth : cases[i].steps);
+                exit(EXIT_FAILURE);
+            }
+        }
+    }
+    /* flat to flat: as before, smooth or not */
+    gDioramaSmoothSlopes = true;
+    object.previousMapX = 0;
+    object.currentMapX = 1;
+    object.mapPixelOffsetX = -8;
+    CHECK(DioramaSprite_BuildResolvedPose(&sSnapshot, sResolvedCells, sSnapshot.visibleCellCount, &object, &pose));
+    CHECK_CLOSE(pose.groundY, 0.0f);
+    gDioramaSmoothSlopes = false;
+    sSnapshot.cells[row + 2].behavior = 0;
+    memset(sResolvedCells, 0, sizeof(sResolvedCells));
+}
+
 static void TestCardinalMovementAnchors(void)
 {
     struct DioramaObjectSnapshot object = MakeObject();
@@ -440,6 +512,7 @@ int main(void)
     TestPoseAndInterpolation();
     TestJumpLift();
     TestResolvedPlateauPose();
+    TestSmoothRampPose();
     TestCardinalMovementAnchors();
     TestInterpolationDiscontinuities();
     TestDepthOrder();

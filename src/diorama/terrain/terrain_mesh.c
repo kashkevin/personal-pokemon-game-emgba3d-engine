@@ -487,6 +487,10 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
     at = PutU16(at, input->chunkY);
     at = PutU32(at, input->rulesGeneration);
     at = PutByte(at, input->rockFaces);
+    /* smooth ramps (AppendRamps): a mesh built with them is not one built without (nothing written while they are
+     * off, so every other signature is as before) */
+    if (gDioramaSmoothSlopes)
+        at = PutByte(at, 0x5A);
     /* The rock wall a side of plain ground shows, and each cell's claimOwner (GroundSideShowsRock reads both): a mesh
      * stands for any input of its signature, the renderer's cache and earlier versions (KNOWN_ISSUES MS-118). */
     if (input->rockFaces)
@@ -972,6 +976,11 @@ static bool BuildOccupancy(const struct DioramaTerrainChunkInput *input,
                         int16_t stairGround = HeightToVoxel(cell->groundHeight);
 
                         top = StairTop(cell, pixelX, pixelY);
+                        /* a smooth ramp (AppendRamps): its columns at its low end, the ramp over them */
+                        if (DioramaRules_IsSmoothRamp(cell->archetype, cell->behavior))
+                            top = HeightToVoxel(descending ? cell->groundHeight - (cell->featureHeight != 0.0f
+                                                                                    ? cell->featureHeight : 1.0f)
+                                                           : cell->groundHeight);
                         /* stairs up from a terrace's lower level stand on it,
                          * a voxel under it as the ground there is (from -1
                          * they were no column at all: a hole where they are
@@ -2945,6 +2954,203 @@ static bool AppendPixelQuad(struct DioramaTerrainVertex *vertices, uint32_t capa
     return true;
 }
 
+static void GrowBounds(struct DioramaTerrainMesh *mesh, float x, float y, float z)
+{
+    if (x < mesh->bounds.minX) mesh->bounds.minX = x;
+    if (x > mesh->bounds.maxX) mesh->bounds.maxX = x;
+    if (y < mesh->bounds.minY) mesh->bounds.minY = y;
+    if (y > mesh->bounds.maxY) mesh->bounds.maxY = y;
+    if (z < mesh->bounds.minZ) mesh->bounds.minZ = z;
+    if (z > mesh->bounds.maxZ) mesh->bounds.maxZ = z;
+}
+
+/* A material's whole tile, inset as FaceMaterial insets a face's. */
+static struct DioramaTerrainMaterial WholeTile(const struct DioramaTerrainMaterial *source)
+{
+    const float inset = 0.02f / DIORAMA_VOXELS_PER_CELL;
+    struct DioramaTerrainMaterial out = *source;
+
+    out.u0 = source->u0 + (source->u1 - source->u0) * inset;
+    out.u1 = source->u0 + (source->u1 - source->u0) * (1.0f - inset);
+    out.v0 = source->v0 + (source->v1 - source->v0) * inset;
+    out.v1 = source->v0 + (source->v1 - source->v0) * (1.0f - inset);
+    return out;
+}
+
+/*
+ * Smooth ramps (the owner's #71 C preview, gDioramaSmoothSlopes; BuildOccupancy stands the cell's columns at the
+ * ramp's low end): each bumpy or muddy slope cell the chunk owns is one sloped quad from its low edge to its high
+ * edge, laid with its whole top tile, and on its two sides along the climb a triangle from the low end's height up
+ * to the ramp, its side tile - only above what stands beside it (a cliff's rock beside a ramp is the rock's face;
+ * a ramp beside it the same ramp: nothing between them).
+ */
+static bool AppendRamps(const struct DioramaTerrainChunkInput *input, struct DioramaTerrainVertex *vertices,
+                        uint32_t capacity, uint32_t *count, struct DioramaTerrainMesh *mesh)
+{
+    int gridX;
+    int gridY;
+
+    if (!gDioramaSmoothSlopes)
+        return true;
+    for (gridY = DIORAMA_TERRAIN_HALO; gridY < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; gridY++)
+        for (gridX = DIORAMA_TERRAIN_HALO; gridX < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; gridX++)
+        {
+            const struct DioramaTerrainCell *cell = GetCell(input, gridX, gridY);
+            bool descending;
+            int direction;
+            float feature;
+            float ground;
+            float far;
+            float low;
+            float high;
+            float west;
+            float east;
+            float north;
+            float south;
+            float corner[4]; /* the ramp's height at NW, NE, SE, SW */
+            float positions[4][3];
+            struct DioramaTerrainMaterial material;
+            int riser;
+            int side;
+
+            if (!cell->present || cell->shape != DIORAMA_SHAPE_STAIRS
+             || !DioramaRules_IsSmoothRamp(cell->archetype, cell->behavior))
+                continue;
+            descending = cell->archetype >= DIORAMA_ARCHETYPE_STAIRS_DOWN_N;
+            direction = cell->archetype - (descending ? DIORAMA_ARCHETYPE_STAIRS_DOWN_N : DIORAMA_ARCHETYPE_STAIRS_N);
+            feature = cell->featureHeight != 0.0f ? cell->featureHeight : 1.0f;
+            ground = VoxelY(HeightToVoxel(cell->groundHeight));
+            far = ground + (descending ? -feature : feature);
+            low = ground < far ? ground : far;
+            high = ground < far ? far : ground;
+            west = VoxelX(cell->mapX * DIORAMA_VOXELS_PER_CELL);
+            east = VoxelX((cell->mapX + 1) * DIORAMA_VOXELS_PER_CELL);
+            north = VoxelZ(cell->mapY * DIORAMA_VOXELS_PER_CELL);
+            south = VoxelZ((cell->mapY + 1) * DIORAMA_VOXELS_PER_CELL);
+            /* the profile's coordinate 0 (rules.c DioramaRules_ProfileHeight) is at the ground: climbing north
+             * (0) the south edge, south (1) the north edge, east (2) the west edge, west (3) the east edge */
+            corner[0] = direction == 1 || direction == 2 ? ground : far;
+            corner[1] = direction == 1 || direction == 3 ? ground : far;
+            corner[2] = direction == 0 || direction == 3 ? ground : far;
+            corner[3] = direction == 0 || direction == 2 ? ground : far;
+            /* the ramp's face is the drawing the stairs' risers carry - their side facing down the slope (the
+             * steps' tops are the ground's tile: a ramp in it was a grass sheet with a stone at its foot) */
+            riser = direction == 0 ? DIORAMA_MATERIAL_FACE_NORTH : direction == 1 ? DIORAMA_MATERIAL_FACE_SOUTH
+                  : direction == 2 ? DIORAMA_MATERIAL_FACE_EAST : DIORAMA_MATERIAL_FACE_WEST;
+            if (!descending)   /* climbing: the risers face back down, opposite the climb */
+                riser = riser == DIORAMA_MATERIAL_FACE_NORTH ? DIORAMA_MATERIAL_FACE_SOUTH
+                      : riser == DIORAMA_MATERIAL_FACE_SOUTH ? DIORAMA_MATERIAL_FACE_NORTH
+                      : riser == DIORAMA_MATERIAL_FACE_EAST ? DIORAMA_MATERIAL_FACE_WEST : DIORAMA_MATERIAL_FACE_EAST;
+            if (cell->materials[riser].layer == DIORAMA_MATERIAL_NONE)
+                riser = DIORAMA_MATERIAL_FACE_TOP;
+            if (cell->materials[riser].layer != DIORAMA_MATERIAL_NONE)
+            {
+                static const uint8_t order[6] = {0, 1, 2, 0, 2, 3};   /* AppendQuad's: FoldQuads folds them */
+                /* the drawing's top at the ramp's high edge, its bottom at the low edge; across, west to east (a
+                 * ramp climbing north or south) or north to south (east or west) */
+                const bool eastIsAcross = direction <= 1;
+                const float acrossOf[4] = {0.0f, eastIsAcross ? 1.0f : 0.0f, 1.0f, eastIsAcross ? 0.0f : 1.0f};
+
+                positions[0][0] = west; positions[0][1] = corner[0]; positions[0][2] = north;
+                positions[1][0] = east; positions[1][1] = corner[1]; positions[1][2] = north;
+                positions[2][0] = east; positions[2][1] = corner[2]; positions[2][2] = south;
+                positions[3][0] = west; positions[3][1] = corner[3]; positions[3][2] = south;
+                material = WholeTile(&cell->materials[riser]);
+                for (int i = 0; i < 6; i++)
+                {
+                    int c = order[i];
+                    float down = (high - corner[c]) / (high - low);
+
+                    if (!AppendVertex(vertices, capacity, count, positions[c][0], positions[c][1], positions[c][2],
+                                      material.u0 + (material.u1 - material.u0) * acrossOf[c],
+                                      material.v0 + (material.v1 - material.v0) * down, 1.0f, material.layer, 0.0f,
+                                      UINT32_C(0xFFFFFFFF)))
+                        return false;
+                }
+                for (int i = 0; i < 4; i++)
+                    GrowBounds(mesh, positions[i][0], positions[i][1], positions[i][2]);
+                mesh->topFaceCount++;
+            }
+            /* the two sides along the climb: west and east for a north-south ramp, north and south for an
+             * east-west one */
+            for (side = 0; side < 2; side++)
+            {
+                bool alongZ = direction <= 1;
+                int neighborX = gridX + (alongZ ? (side == 0 ? -1 : 1) : 0);
+                int neighborY = gridY + (alongZ ? 0 : (side == 0 ? -1 : 1));
+                const struct DioramaTerrainCell *neighbor = GetCell(input, neighborX, neighborY);
+                int face = alongZ ? (side == 0 ? DIORAMA_MATERIAL_FACE_WEST : DIORAMA_MATERIAL_FACE_EAST)
+                                  : (side == 0 ? DIORAMA_MATERIAL_FACE_NORTH : DIORAMA_MATERIAL_FACE_SOUTH);
+                float floor = low;
+                float lowEnd[2];   /* (x, z) of the side's end where the ramp is at `low` */
+                float highEnd[2];
+                bool lowAtStart;   /* the low end at the side's north or west end */
+                float t;
+                float shade;
+                float vFloor;
+
+                if (cell->materials[face].layer == DIORAMA_MATERIAL_NONE)
+                    continue;
+                if (neighbor->present && neighbor->shape != DIORAMA_SHAPE_HIDDEN)
+                {
+                    if (neighbor->shape == DIORAMA_SHAPE_STAIRS
+                     && DioramaRules_IsSmoothRamp(neighbor->archetype, neighbor->behavior)
+                     && neighbor->archetype == cell->archetype
+                     && neighbor->groundHeight == cell->groundHeight
+                     && neighbor->featureHeight == cell->featureHeight)
+                        continue;   /* the same ramp goes on */
+                    if (VoxelY(HeightToVoxel(neighbor->visualHeight)) > floor)
+                        floor = VoxelY(HeightToVoxel(neighbor->visualHeight));
+                }
+                if (floor >= high)
+                    continue;
+                /* the side's ends: along z (north to south) or along x (west to east) */
+                if (alongZ)
+                {
+                    float x = side == 0 ? west : east;
+                    bool northLow = (side == 0 ? corner[0] : corner[1]) == low;
+
+                    lowEnd[0] = x; lowEnd[1] = northLow ? north : south;
+                    highEnd[0] = x; highEnd[1] = northLow ? south : north;
+                    lowAtStart = northLow;
+                }
+                else
+                {
+                    float z = side == 0 ? north : south;
+                    bool westLow = (side == 0 ? corner[0] : corner[3]) == low;
+
+                    lowEnd[0] = westLow ? west : east; lowEnd[1] = z;
+                    highEnd[0] = westLow ? east : west; highEnd[1] = z;
+                    lowAtStart = westLow;
+                }
+                t = (floor - low) / (high - low);
+                shade = !alongZ && side == 0 ? 0.82f : 0.68f;
+                material = WholeTile(&cell->materials[face]);
+                vFloor = material.v0 + (material.v1 - material.v0) * (high - floor) / (high - low);
+                {
+                    /* S on the ramp's edge at `floor`, F under the high end at `floor`, H the high end */
+                    float sx = lowEnd[0] + (highEnd[0] - lowEnd[0]) * t;
+                    float sz = lowEnd[1] + (highEnd[1] - lowEnd[1]) * t;
+                    float uLow = lowAtStart ? material.u0 : material.u1;
+                    float uHigh = lowAtStart ? material.u1 : material.u0;
+                    float uS = uLow + (uHigh - uLow) * t;
+
+                    if (!AppendVertex(vertices, capacity, count, sx, floor, sz, uS, vFloor, shade,
+                                      material.layer, 0.0f, UINT32_C(0xFFFFFFFF))
+                     || !AppendVertex(vertices, capacity, count, highEnd[0], floor, highEnd[1], uHigh, vFloor, shade,
+                                      material.layer, 0.0f, UINT32_C(0xFFFFFFFF))
+                     || !AppendVertex(vertices, capacity, count, highEnd[0], high, highEnd[1], uHigh, material.v0,
+                                      shade, material.layer, 0.0f, UINT32_C(0xFFFFFFFF)))
+                        return false;
+                    GrowBounds(mesh, sx, floor, sz);
+                    GrowBounds(mesh, highEnd[0], high, highEnd[1]);
+                    mesh->sideFaceCount++;
+                }
+            }
+        }
+    return true;
+}
+
 static bool AppendPixelPrimitives(const struct DioramaTerrainChunkInput *input,
                                   struct DioramaTerrainVertex *vertices,
                                   uint32_t capacity, uint32_t *count,
@@ -3343,6 +3549,7 @@ bool DioramaTerrain_BuildChunk(const struct DioramaTerrainChunkInput *input,
 
     if (!AppendTreeHulls(input, vertices, vertexCapacity, &vertexCount, mesh)
      || !AppendGrassEdges(input, vertices, vertexCapacity, &vertexCount, mesh)
+     || !AppendRamps(input, vertices, vertexCapacity, &vertexCount, mesh)
      || !AppendPixelPrimitives(input, vertices, vertexCapacity, &vertexCount, mesh))
         return false;
 

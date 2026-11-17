@@ -165,6 +165,72 @@ static bool IsLedgeBankRule(const struct DioramaResolvedCell *rule)
         && rule->archetype != DIORAMA_ARCHETYPE_GROUPED_HULL;
 }
 
+/*
+ * The ground under a sprite crossing a smooth ramp's cell (the owner's #71 C preview, rules.h gDioramaSmoothSlopes):
+ * on the ramp's cell the ramp's own height under the sprite's pixel; on the other cell a line from that cell's centre
+ * to the ramp's edge. (The line between the two cells' centres, right for steps, floated a quarter level over a
+ * ramp's foot and sank as far into its top.) False when neither cell is a ramp or the move is not along one axis.
+ */
+static bool RampGround(const struct DioramaObjectSnapshot *object,
+                       const struct DioramaCellSnapshot *currentCell, const struct DioramaResolvedCell *currentRule,
+                       float currentHeight, const struct DioramaCellSnapshot *previousCell,
+                       const struct DioramaResolvedCell *previousRule, float previousHeight,
+                       int deltaX, int deltaY, float *ground)
+{
+    const int half = DIORAMA_BUILDING_PIXELS_PER_CELL / 2;
+    bool currentRamp;
+    bool previousRamp;
+    bool onPrevious;
+    int delta;
+    int along;
+    int pixel;
+    int edgePixel;
+    const struct DioramaCellSnapshot *cell;
+    const struct DioramaCellSnapshot *otherCell;
+    const struct DioramaResolvedCell *rule;
+    const struct DioramaResolvedCell *otherRule;
+    uint8_t elevation;
+    uint8_t otherElevation;
+
+    if (previousCell == NULL || previousRule == NULL || (deltaX != 0) == (deltaY != 0))
+        return false;
+    currentRamp = DioramaRules_IsSmoothRamp(currentRule->archetype, currentCell->behavior);
+    previousRamp = DioramaRules_IsSmoothRamp(previousRule->archetype, previousCell->behavior);
+    if (!currentRamp && !previousRamp)
+        return false;
+    delta = deltaX != 0 ? deltaX : deltaY;
+    /* the sprite's pixel along the move, from the current cell's west (north) edge: before the current cell or
+     * past it, it is still on the previous one */
+    along = half + (deltaX != 0 ? object->mapPixelOffsetX : object->mapPixelOffsetY);
+    onPrevious = along < 0 || along >= DIORAMA_BUILDING_PIXELS_PER_CELL;
+    pixel = along < 0 ? along + DIORAMA_BUILDING_PIXELS_PER_CELL
+          : along >= DIORAMA_BUILDING_PIXELS_PER_CELL ? along - DIORAMA_BUILDING_PIXELS_PER_CELL : along;
+    cell = onPrevious ? previousCell : currentCell;
+    rule = onPrevious ? previousRule : currentRule;
+    elevation = onPrevious ? object->previousElevation : object->elevation;
+    if (onPrevious ? previousRamp : currentRamp)
+    {
+        *ground = DioramaRules_ObjectGroundHeight(rule, cell->elevation, elevation, cell->behavior,
+                                                  deltaX != 0 ? pixel : half, deltaX != 0 ? half : pixel);
+        return true;
+    }
+    /* on the cell that is not a ramp: from its centre to the ramp's pixel at their shared edge */
+    otherCell = onPrevious ? currentCell : previousCell;
+    otherRule = onPrevious ? currentRule : previousRule;
+    otherElevation = onPrevious ? object->elevation : object->previousElevation;
+    edgePixel = (delta > 0) == onPrevious ? 0 : DIORAMA_BUILDING_PIXELS_PER_CELL - 1;
+    {
+        float edge = DioramaRules_ObjectGroundHeight(otherRule, otherCell->elevation, otherElevation,
+                                                     otherCell->behavior, deltaX != 0 ? edgePixel : half,
+                                                     deltaX != 0 ? half : edgePixel);
+        float centre = onPrevious ? previousHeight : currentHeight;
+        float t = (float)abs(pixel - half) / half;
+
+        *ground = centre + (edge - centre) * t;
+    }
+    return true;
+}
+
 static bool BuildPose(const struct DioramaSceneSnapshot *snapshot,
                       const struct DioramaResolvedCell *resolvedCells,
                       uint16_t resolvedCount,
@@ -253,7 +319,9 @@ static bool BuildPose(const struct DioramaSceneSnapshot *snapshot,
         pose->x += object->compositeShiftX / 16.0f;
         pose->z -= object->compositeFeetShift / 16.0f;
     }
-    pose->groundY = previousHeight + (currentHeight - previousHeight) * moveProgress;
+    if (!RampGround(object, currentCell, currentRule, currentHeight, previousCell, previousRule, previousHeight,
+                    deltaX, deltaY, &pose->groundY))
+        pose->groundY = previousHeight + (currentHeight - previousHeight) * moveProgress;
     pose->y = pose->groundY - object->spriteY2 / 16.0f;
     return true;
 }
