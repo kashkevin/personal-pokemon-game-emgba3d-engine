@@ -31,6 +31,7 @@
 #include "platform/png_write.h"
 #ifdef ENABLE_DIORAMA
 #include "diorama/battle_scene.h"
+#include "diorama/gl_battle.h"
 #endif
 
 /* The generated SPECIES_* -> library target table (the runtime export's bsl_species_map.h). */
@@ -117,6 +118,9 @@ static struct Strip sStrips[BS_STRIPS];
 static struct Active sActive[BS_LOOKS];
 static uint32_t sFrames, sBattleFrames, sStripClock;
 static bool sLog;
+/* PKMN_BATTLE_SPRITES_2D=1: the pack draws 2D battles too (PackDrawn); PKMN_BATTLE_SPRITES_SPINDA=1: Spinda from the
+ * pack's animation (Resolve) */
+static bool sPack2D, sSpindaFromPack;
 static FILE *sTrace;
 /* Costs (PKMN_BATTLE_SPRITES_LOG): the whole software picture of a battle frame, the frame setup
  * here, and decoding facings, logged every 600 battle frames. */
@@ -338,6 +342,8 @@ static void Init(void)
     for (unsigned i = 0; i < BS_STRIPS; i++)
         sStrips[i].facing = -1;
     sLog = EnvInt("PKMN_BATTLE_SPRITES_LOG", 0) != 0;
+    sPack2D = EnvInt("PKMN_BATTLE_SPRITES_2D", 0) != 0;
+    sSpindaFromPack = EnvInt("PKMN_BATTLE_SPRITES_SPINDA", 0) != 0;
     value = SDL_getenv("PKMN_BATTLE_SPRITES_TRACE");
     if (value != NULL && value[0] != '\0' && (sTrace = fopen(value, "w")) != NULL)
         setvbuf(sTrace, NULL, _IOLBF, 1 << 16); /* whole lines: a test may end the process at any time */
@@ -484,6 +490,11 @@ static void Resolve(unsigned b)
         active->why = "the Substitute doll";
     else if (look->gx1 <= look->gx0)
         active->why = "an empty GBA picture";
+    /* Spinda keeps the game's own picture (the owner's #76, the original Emerald as the reference): the GBA draws each
+     * Spinda's four spots from its personality onto it; the pack's one animation has one pattern for every Spinda.
+     * PKMN_BATTLE_SPRITES_SPINDA=1 draws the animation (KNOWN_ISSUES S3). */
+    else if (look->species == SPECIES_SPINDA && !sSpindaFromPack)
+        active->why = "Spinda keeps its own spots (the GBA picture draws each one's from its personality)";
     else if ((target = bsl_target_for_species(sPack, look->species)) < 0)
         active->why = "species not in the pack";
     else if ((active->facing = bsl_select(sPack, target, look->back, look->female)) < 0)
@@ -874,6 +885,24 @@ static void NoteBgCopies(void)
     }
 }
 
+/*
+ * The pack draws battles drawn in 3D (the owner's #77, the original Emerald as the reference): a 2D battle - the
+ * Classic 2D game, the 3D game's classic view (F4), a map with no 3D field to stand in - is the GBA picture in its
+ * frame, where a library sprite taller or wider than the GBA picture is cut at the frame's edge (181 of 730 fronts
+ * reach above it at rest, KNOWN_ISSUES S5); there the game's own sprites, which always fit, as the original draws.
+ * PKMN_BATTLE_SPRITES_2D=1 draws the pack in 2D battles too (cut at the frame, as before).
+ */
+static bool PackDrawn(void)
+{
+    if (sPack2D)
+        return true;
+#ifdef ENABLE_DIORAMA
+    return DioramaGLBattle_IsActive();
+#else
+    return false;
+#endif
+}
+
 void BattleSprites_BeginFrame(void)
 {
     const struct OamData *oam = (const struct OamData *)OAM;
@@ -890,7 +919,7 @@ void BattleSprites_BeginFrame(void)
     sFrames++;
     if (sLatched.battleScreen)
         NoteBgCopies();
-    if (sPack == NULL || !sLatched.battleScreen)
+    if (sPack == NULL || !sLatched.battleScreen || !PackDrawn())
     {
         sBattleFrames = 0;
         return;
