@@ -49,7 +49,21 @@
 #define GYM_SIGN_TOP(id) { PROP(id, SIGN, SLAB, 1, LOWER), .depth = 2, .standOn = 1 }
 #define GYM_SIGN_BOARD(id) { PROP(id, SIGN, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 11, .depth = 2 }
 
+/* The Acro Bike's rails in the Safari Zone's south (MB_HORIZONTAL_RAIL decks a level over the valley, MS-222):
+ * the cell south of a rail draws the beam's front (rows 0-2) and its posts (rows 3-13) on its upper layer, over
+ * the valley's grass. They stand: a slab against the rail's south edge, 4 pixels deep under the beam's top (the
+ * rail's own rows 11-15, its deck's), from the cell's ground up to the deck (DIORAMA_PROP_TO_NORTH_DECK) - the
+ * front a bar, the posts under it - so the beam has a front and stands on its posts, not a white line from a low
+ * camera (the owner's order of 2026-11-17, docs/owner-decisions.md #73). Under it the cell's grass alone. The same
+ * rails in the General tileset stand over Route 119's ponds. Not under a rail whose own cell draws the posts of the
+ * rail north of it (a deck: the Safari's 0x316 and 0x31E, General's 0x0ED and 0x0FB): those stay drawn on it. */
+#define RAIL_POSTS(id) { PROP(id, FENCE, SLAB, 1, LOWER), .artBottom = 14, .depth = 4, .offsetZ = -10, \
+                         .flags = DIORAMA_PROP_TO_NORTH_DECK }
+/* a north-south rail's end (Route 119's): the beam's end and one post under it */
+#define RAIL_END_POST(id) { PROP(id, FENCE, SLAB, 1, LOWER), .artBottom = 12, .depth = 4, .offsetZ = -10, \
+                            .flags = DIORAMA_PROP_TO_NORTH_DECK }
 static const struct DioramaProp sGeneral[] = {
+    RAIL_POSTS(0x0F5), RAIL_POSTS(0x0F8), RAIL_POSTS(0x0FA), RAIL_END_POST(0x0FC),
     /* The metal sign (towns, routes): drawn alone on its layer, filling the
      * cell, so the ground under it is its neighbours'. */
     { PROP(0x003, SIGN, SLAB, 0, NEIGHBOUR), .depth = 3 },
@@ -325,6 +339,7 @@ static const struct DioramaProp sLilycove[] = {
     /* The Safari Zone's Pokeblock feeders (11, MB_POKEBLOCK_FEEDER; the object audit of 2026-11-14: they lay
      * flat): a box half a tile high, its slot and front drawn on top, as the crates. */
     { PROP(0x310, DECOR, BLOCK, 1, LOWER), .height16 = 8 },
+    RAIL_POSTS(0x315), RAIL_POSTS(0x321), RAIL_POSTS(0x322),
     { PROP(0x250, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2 },
     { PROP(0x251, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2 },
     { PROP(0x252, FENCE, SLAB, 1, LOWER), .shadowIndex = 6, .shadowFromRow = 14, .depth = 2 },
@@ -1038,6 +1053,19 @@ static bool BuildProp(const struct DioramaSceneSnapshot *snapshot,
     if (prop->form == DIORAMA_PROP_RELIEF)
         /* Its back on the cell's north edge, bulging south. */
         base.z += 0.5f - base.depth * 0.5f;
+    if (prop->flags & DIORAMA_PROP_TO_NORTH_DECK)
+    {
+        int northIndex;
+        const struct DioramaCellSnapshot *north = GridCell(snapshot, cell->mapX, cell->mapY - 1, &northIndex);
+        float rise;
+
+        if (north == NULL || resolvedCells[northIndex].shape != DIORAMA_SHAPE_BRIDGE)
+            return true;
+        rise = resolvedCells[northIndex].topHeight - base.y;
+        if (rise < 0.25f)
+            return true;
+        base.height = rise * 16.0f / (float)(DioramaProps_ArtBottom(prop) - prop->artTop);
+    }
     base.sway = (prop->flags & DIORAMA_PROP_SWAY) ? 0.05f * Wind(snapshot->weather) : 0.0f;
     base.phase = Phase(cell->mapX, cell->mapY);
     if (prop->form == DIORAMA_PROP_CARDS)

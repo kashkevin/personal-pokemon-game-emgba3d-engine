@@ -86,6 +86,10 @@ enum DioramaPropFlags
     /* The catalogue's next entry, the same metatile's, stands on the cell too (a flagpole and the low
      * wall it stands on): that entry is found through this one alone. */
     DIORAMA_PROP_AND_NEXT = 1 << 6,
+    /* The front and posts of the Acro Bike rail north of the cell (RAIL_POSTS): they stand from the cell's ground up
+     * to that rail's deck, the art's rows stretched to fit, and only where the cell north is a bridge's deck over the
+     * cell's ground (not on a cliff's top at the deck's level, where a post tile ends a rail at a plateau). */
+    DIORAMA_PROP_TO_NORTH_DECK = 1 << 7,
 };
 
 #define DIORAMA_PROP_OWN_ART 0

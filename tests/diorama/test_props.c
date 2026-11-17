@@ -188,6 +188,34 @@ static void TestFind(void)
            && station->depth == general->depth && station->ground == DIORAMA_PROP_GROUND_LOWER);
         prop = DioramaProps_Find(LAYOUT_SAFARI_ZONE_SOUTH, 0x310);
         CHECK(prop != NULL && prop->form == DIORAMA_PROP_BLOCK && prop->height16 == 8);
+        /* the Acro Bike rails' fronts and posts stand against the rail's south edge, up to its deck (#73) */
+        {
+            static const uint16_t posts[] = {0x315, 0x321, 0x322};
+            unsigned k;
+
+            for (k = 0; k < 3; k++)
+            {
+                prop = DioramaProps_Find(LAYOUT_SAFARI_ZONE_SOUTH, posts[k]);
+                CHECK(prop != NULL && prop->form == DIORAMA_PROP_SLAB && prop->layer == 1
+                   && prop->ground == DIORAMA_PROP_GROUND_LOWER && prop->artTop == 0 && prop->artBottom == 14
+                   && prop->offsetZ == -10 && prop->depth == 4 && (prop->flags & DIORAMA_PROP_TO_NORTH_DECK));
+            }
+            /* the General tileset's (Route 119's; any map of the tileset): the same, and a north-south rail's end */
+            for (k = 0; k < 3; k++)
+            {
+                static const uint16_t general[] = {0x0F5, 0x0F8, 0x0FA};
+
+                prop = DioramaProps_Find(LAYOUT_ROUTE110, general[k]);
+                CHECK(prop != NULL && prop->form == DIORAMA_PROP_SLAB && prop->artBottom == 14
+                   && (prop->flags & DIORAMA_PROP_TO_NORTH_DECK));
+            }
+            prop = DioramaProps_Find(LAYOUT_ROUTE110, 0x0FC);
+            CHECK(prop != NULL && prop->form == DIORAMA_PROP_SLAB && prop->artBottom == 12
+               && (prop->flags & DIORAMA_PROP_TO_NORTH_DECK));
+            /* a rail deck drawing the posts of the rail north of it keeps them drawn (no prop) */
+            CHECK(DioramaProps_Find(LAYOUT_SAFARI_ZONE_SOUTH, 0x316) == NULL
+               && DioramaProps_Find(LAYOUT_ROUTE110, 0x0FB) == NULL);
+        }
         prop = DioramaProps_Find(LAYOUT_SLATEPORT_CITY, 0x229);
         CHECK(prop != NULL && prop->form == DIORAMA_PROP_BLOCK && prop->height16 == 6);
     }
