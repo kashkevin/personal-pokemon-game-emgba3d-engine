@@ -37,6 +37,10 @@
 #include "bsl_species_map.h"
 
 #define BS_BATTLERS 4
+/* A move's own picture of a Pokemon (BattleSprites_NoteMoveMon: Role Play, Snatch), looked up like a
+ * fifth battler's. */
+#define BS_MOVE_COPY BS_BATTLERS
+#define BS_LOOKS (BS_BATTLERS + 1)
 #define BS_VARIANTS 4       /* palettes one battler is drawn in within a frame (its own, a copy's...) */
 #define BS_STRIPS 8         /* decoded facings kept */
 #define BS_NO_SINK INT32_MAX
@@ -66,22 +70,24 @@ struct MonBg
 /* Written by the game thread's hooks. */
 static struct
 {
-    struct Look looks[BS_BATTLERS];
+    struct Look looks[BS_LOOKS];
     struct MonBg monBg[4];
-    int32_t sink[BS_BATTLERS];
+    int32_t sink[BS_LOOKS];
     uint32_t serial;
+    const void *moveCopyTemplate; /* the move's copy: the template its sprite is made from, */
+    uint16_t moveCopyTiles;       /* and the tiles it is drawn from */
 } sPending;
 
 /* Latched with OAM (LoadOam). */
 static struct
 {
     bool battleScreen;
-    struct Look looks[BS_BATTLERS];
-    int16_t tileNum[BS_BATTLERS]; /* the battler sprite's OAM tiles; -1: no usable sprite */
-    int16_t restTop[BS_BATTLERS]; /* its 64x64 box's top-left on the screen at rest (no x2/y2) */
-    int16_t restLeft[BS_BATTLERS];
+    struct Look looks[BS_LOOKS];
+    int16_t tileNum[BS_LOOKS]; /* the battler sprite's OAM tiles; -1: no usable sprite */
+    int16_t restTop[BS_LOOKS]; /* its 64x64 box's top-left on the screen at rest (no x2/y2) */
+    int16_t restLeft[BS_LOOKS];
     struct MonBg monBg[4];
-    int32_t sink[BS_BATTLERS];
+    int32_t sink[BS_LOOKS];
 } sLatched;
 
 struct Strip
@@ -108,7 +114,7 @@ struct Active
 static bool sInit, sOff;
 static BslPack *sPack;
 static struct Strip sStrips[BS_STRIPS];
-static struct Active sActive[BS_BATTLERS];
+static struct Active sActive[BS_LOOKS];
 static uint32_t sFrames, sBattleFrames, sStripClock;
 static bool sLog;
 static FILE *sTrace;
@@ -122,18 +128,18 @@ static struct
 static char sDumpStem[512];
 static uint32_t sDumpFrom, sDumpEvery = 1, sDumpCount;
 static int sDumpAfterLook;          /* dump this many frames after any battler's look changed */
-static uint32_t sLookChangedAt, sLookSerials[BS_BATTLERS];
+static uint32_t sLookChangedAt, sLookSerials[BS_LOOKS];
 
-/* This frame's views: per battler, one per palette it is drawn in. */
-static struct BattleSpriteView sViews[BS_BATTLERS][BS_VARIANTS];
-static const uint16_t *sViewSource[BS_BATTLERS][BS_VARIANTS];
-static uint16_t sViewColors[BS_BATTLERS][BS_VARIANTS][256];
-static float sViewFade[BS_BATTLERS][BS_VARIANTS];
-static uint8_t sViewCount[BS_BATTLERS];
-static struct BattleSpriteView sBase[BS_BATTLERS];
-static uint16_t sBaseFrame[BS_BATTLERS];
-static bool sBaseUsable[BS_BATTLERS];
-static uint32_t sPaletteRefusals[BS_BATTLERS];
+/* This frame's views: per battler (and the move's copy), one per palette it is drawn in. */
+static struct BattleSpriteView sViews[BS_LOOKS][BS_VARIANTS];
+static const uint16_t *sViewSource[BS_LOOKS][BS_VARIANTS];
+static uint16_t sViewColors[BS_LOOKS][BS_VARIANTS][256];
+static float sViewFade[BS_LOOKS][BS_VARIANTS];
+static uint8_t sViewCount[BS_LOOKS];
+static struct BattleSpriteView sBase[BS_LOOKS];
+static uint16_t sBaseFrame[BS_LOOKS];
+static bool sBaseUsable[BS_LOOKS];
+static uint32_t sPaletteRefusals[BS_LOOKS];
 
 const struct BattleSpriteView *gBattleSpriteObjViews[128];
 struct BattleSpriteBgCopy gBattleSpriteBgCopies[4];
@@ -174,14 +180,9 @@ static void PicBox(const uint8_t *pic, struct Look *look)
     look->gy1 = (int8_t)y1;
 }
 
-void BattleSprites_NoteMon(uint32_t battler, uint32_t species, uint32_t personality, bool shiny,
-                           const uint16_t *palette, const void *pic)
+static void SetLook(struct Look *look, uint32_t species, uint32_t personality, bool shiny, bool back,
+                    const uint16_t *palette, const void *pic)
 {
-    struct Look *look;
-
-    if (battler >= BS_BATTLERS || palette == NULL || pic == NULL)
-        return;
-    look = &sPending.looks[battler];
     species = SanitizeSpeciesId(species);
     if (species == SPECIES_UNOWN)
         species = GetUnownSpeciesId(personality);
@@ -191,11 +192,31 @@ void BattleSprites_NoteMon(uint32_t battler, uint32_t species, uint32_t personal
     look->personality = personality;
     look->shiny = shiny;
     look->female = GetGenderFromSpeciesAndPersonality(species, personality) == MON_FEMALE;
-    look->back = GetBattlerPositionSide(battler) == B_SIDE_PLAYER;
+    look->back = back;
     memcpy(look->palette, palette, sizeof(look->palette));
     PicBox(pic, look);
     look->serial = ++sPending.serial;
+}
+
+void BattleSprites_NoteMon(uint32_t battler, uint32_t species, uint32_t personality, bool shiny,
+                           const uint16_t *palette, const void *pic)
+{
+    if (battler >= BS_BATTLERS || palette == NULL || pic == NULL)
+        return;
+    SetLook(&sPending.looks[battler], species, personality, shiny,
+            GetBattlerPositionSide(battler) == B_SIDE_PLAYER, palette, pic);
     sPending.sink[battler] = BS_NO_SINK;
+}
+
+void BattleSprites_NoteMoveMon(uint32_t species, uint32_t personality, bool shiny, bool back,
+                               const uint16_t *palette, const void *pic, uint32_t tileNum,
+                               const void *spriteTemplate)
+{
+    if (palette == NULL || pic == NULL || spriteTemplate == NULL)
+        return;
+    SetLook(&sPending.looks[BS_MOVE_COPY], species, personality, shiny, back, palette, pic);
+    sPending.moveCopyTemplate = spriteTemplate;
+    sPending.moveCopyTiles = (uint16_t)tileNum;
 }
 
 void BattleSprites_NoteSubstitute(uint32_t battler)
@@ -233,12 +254,13 @@ static void ClearPending(void)
 {
     unsigned i;
 
-    for (i = 0; i < BS_BATTLERS; i++)
+    for (i = 0; i < BS_LOOKS; i++)
     {
         sPending.looks[i].valid = false;
         sPending.looks[i].substitute = false;
         sPending.sink[i] = BS_NO_SINK;
     }
+    sPending.moveCopyTemplate = NULL;
     for (i = 0; i < 4; i++)
         sPending.monBg[i].battler = -1;
 }
@@ -274,6 +296,27 @@ void BattleSprites_LatchOam(void)
         sLatched.tileNum[b] = (int16_t)sprite->oam.tileNum;
         sLatched.restTop[b] = (int16_t)(sprite->y + sprite->centerToCornerVecY);
         sLatched.restLeft[b] = (int16_t)(sprite->x + sprite->centerToCornerVecX);
+    }
+    /* A move's own picture of a Pokemon, while its sprite is up: the one made from the template the
+     * move gave, on its tiles. Gone with its sprite (the tiles may be another sprite's next). */
+    sLatched.tileNum[BS_MOVE_COPY] = -1;
+    if (sLatched.battleScreen && sLatched.looks[BS_MOVE_COPY].valid && sPending.moveCopyTemplate != NULL)
+    {
+        unsigned id;
+
+        for (id = 0; id < MAX_SPRITES; id++)
+        {
+            const struct Sprite *sprite = &gSprites[id];
+
+            if (!sprite->inUse || (const void *)sprite->template != sPending.moveCopyTemplate
+             || sprite->oam.tileNum != sPending.moveCopyTiles || sprite->oam.shape != SPRITE_SHAPE(64x64)
+             || sprite->oam.size != SPRITE_SIZE(64x64))
+                continue;
+            sLatched.tileNum[BS_MOVE_COPY] = (int16_t)sprite->oam.tileNum;
+            sLatched.restTop[BS_MOVE_COPY] = (int16_t)(sprite->y + sprite->centerToCornerVecY);
+            sLatched.restLeft[BS_MOVE_COPY] = (int16_t)(sprite->x + sprite->centerToCornerVecX);
+            break;
+        }
     }
 }
 
@@ -373,7 +416,7 @@ static struct Strip *GetStrip(int facing)
     {
         bool busy = false;
 
-        for (unsigned b = 0; b < BS_BATTLERS; b++)
+        for (unsigned b = 0; b < BS_LOOKS; b++)
             if (sActive[b].usable && sActive[b].strip == &sStrips[i])
                 busy = true;
         if (busy)
@@ -468,13 +511,15 @@ static void Resolve(unsigned b)
     if (sLog && look->valid)
     {
         if (active->usable)
-            SDL_Log("Battle sprites: battler %u %s %s%s%s -> pack facing %d (%s, %ux%u, %u frames, %u ms loop), "
-                    "at %d,%d in the box", b, SpeciesName(look->species), look->back ? "back" : "front",
+            SDL_Log("Battle sprites: %s %u %s %s%s%s -> pack facing %d (%s, %ux%u, %u frames, %u ms loop), "
+                    "at %d,%d in the box", b == BS_MOVE_COPY ? "move copy" : "battler", b,
+                    SpeciesName(look->species), look->back ? "back" : "front",
                     look->shiny ? " shiny" : "", look->female ? " female" : "", active->facing,
                     active->info->source, active->info->frame_width, active->info->frame_height,
                     active->info->unique_frames, active->info->loop_ms, active->left, active->top);
         else
-            SDL_Log("Battle sprites: battler %u species %u (%s) %s%s%s -> GBA sprite: %s", b, look->species,
+            SDL_Log("Battle sprites: %s %u species %u (%s) %s%s%s -> GBA sprite: %s",
+                    b == BS_MOVE_COPY ? "move copy" : "battler", b, look->species,
                     SpeciesName(look->species), look->back ? "back" : "front", look->shiny ? " shiny" : "",
                     look->female ? " female" : "", active->why);
     }
@@ -610,16 +655,17 @@ static void Trace(void)
 
     fprintf(sTrace, "{\"frame\": %u, \"battle_frame\": %u, \"now_ms\": %u, \"battlers\": [", sFrames, sBattleFrames,
             (uint32_t)((uint64_t)sFrames * GBA_FRAME_NUM / GBA_FRAME_DEN));
-    for (b = 0; b < BS_BATTLERS; b++)
+    for (b = 0; b < BS_LOOKS; b++)
     {
         const struct Look *look = &sLatched.looks[b];
 
-        if (!look->valid)
+        if (!look->valid || (b == BS_MOVE_COPY && sLatched.tileNum[b] < 0))
             continue;
         fprintf(sTrace, "%s{\"battler\": %u, \"species\": %u, \"id\": \"%s\", \"back\": %d, \"shiny\": %d, "
-                        "\"female\": %d, \"tiles\": %d, \"gba_box\": [%d, %d, %d, %d]",
+                        "\"female\": %d, \"tiles\": %d, \"gba_box\": [%d, %d, %d, %d]%s",
                 first ? "" : ", ", b, look->species, SpeciesName(look->species), look->back, look->shiny,
-                look->female, sLatched.tileNum[b], look->gx0, look->gy0, look->gx1, look->gy1);
+                look->female, sLatched.tileNum[b], look->gx0, look->gy0, look->gx1, look->gy1,
+                b == BS_MOVE_COPY ? ", \"move_copy\": 1" : "");
         if (sActive[b].usable && !sBaseUsable[b])
             fprintf(sTrace, ", \"facing\": %d, \"source\": \"%s\", \"no_sprite\": 1", sActive[b].facing,
                     sActive[b].info->source);
@@ -641,11 +687,11 @@ static void Trace(void)
         const struct OamData *m = &((const struct OamData *)OAM)[oam->matrixNum * 4];
         const struct BattleSpriteView *view = gBattleSpriteObjViews[i];
 
-        for (b = 0; b < BS_BATTLERS; b++)
+        for (b = 0; b < BS_LOOKS; b++)
             if (sLatched.tileNum[b] >= 0 && oam->tileNum == (uint16_t)sLatched.tileNum[b] && oam->shape == 0
              && oam->size == 3 && ((oam->affineMode & 1) || !(oam->affineMode & 2)))
                 break;
-        if (b == BS_BATTLERS)
+        if (b == BS_LOOKS)
             continue;
         fprintf(sTrace, "%s{\"oam\": %u, \"battler\": %u, \"x\": %u, \"y\": %u, \"affine\": %u, \"priority\": %u, "
                         "\"palette\": %u, \"mode\": %u, \"mosaic\": %u, \"flip\": %u, \"pack\": %d",
@@ -670,15 +716,15 @@ static void Trace(void)
     fprintf(sTrace, "]}\n");
 }
 
-/* The battler a view belongs to. */
+/* The battler a view belongs to (BS_MOVE_COPY: the move's copy; BS_LOOKS: none). */
 static unsigned ViewBattler(const struct BattleSpriteView *view)
 {
     unsigned b;
 
-    for (b = 0; b < BS_BATTLERS; b++)
+    for (b = 0; b < BS_LOOKS; b++)
         if (view >= sViews[b] && view < sViews[b] + BS_VARIANTS)
             return b;
-    return BS_BATTLERS;
+    return BS_LOOKS;
 }
 
 /* The screen box a battler's frames cover at rest (x1, y1 exclusive); false when it lies inside
@@ -789,6 +835,7 @@ static void Overflow(void)
             if (view == NULL || oam[i].priority != prio || oam[i].objMode == 2)
                 continue;
             b = ViewBattler(view);
+            /* not the move's copy: it runs on from off the picture (Snatch), where the GBA shows none of it */
             if (b >= BS_BATTLERS || !RestBox(b, box))
                 continue;
             x = oam[i].x;
@@ -849,14 +896,14 @@ void BattleSprites_BeginFrame(void)
         return;
     }
     sBattleFrames++;
-    for (b = 0; b < BS_BATTLERS; b++)
+    for (b = 0; b < BS_LOOKS; b++)
         if (sLatched.looks[b].valid && sLatched.looks[b].serial != sLookSerials[b])
         {
             sLookSerials[b] = sLatched.looks[b].serial;
             sLookChangedAt = sBattleFrames;
         }
     nowMs = (uint32_t)((uint64_t)sFrames * GBA_FRAME_NUM / GBA_FRAME_DEN);
-    for (b = 0; b < BS_BATTLERS; b++)
+    for (b = 0; b < BS_LOOKS; b++)
     {
         const BslFacingInfo *info;
         uint32_t frame;
@@ -885,13 +932,14 @@ void BattleSprites_BeginFrame(void)
 
     if (sOff)
     {
-        for (b = 0; b < BS_BATTLERS; b++)
+        for (b = 0; b < BS_LOOKS; b++)
             sBaseUsable[b] = false;
         if (sTrace != NULL)
             Trace();
         return;
     }
-    /* Every 64x64 entry on the battlers' tiles: the battler sprite, or a move's copy of it. */
+    /* Every 64x64 entry on the battlers' tiles: the battler sprite, or a move's copy of it; and the
+     * move's own picture of a Pokemon. */
     for (i = 0; i < 128; i++)
     {
         const struct OamData *e = &oam[i];
@@ -900,10 +948,10 @@ void BattleSprites_BeginFrame(void)
             continue;
         if (!(e->affineMode & 1) && (e->affineMode & 2))
             continue;
-        for (b = 0; b < BS_BATTLERS; b++)
+        for (b = 0; b < BS_LOOKS; b++)
             if (sBaseUsable[b] && e->tileNum == (uint16_t)sLatched.tileNum[b])
                 break;
-        if (b == BS_BATTLERS)
+        if (b == BS_LOOKS)
             continue;
         gBattleSpriteObjViews[i] = ViewFor(b, (const uint16_t *)(PLTT + 0x200) + e->paletteNum * 16);
     }

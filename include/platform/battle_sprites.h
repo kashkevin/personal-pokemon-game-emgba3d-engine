@@ -22,6 +22,9 @@
  * effects, the 3D world - layers over and under it exactly as it did over and
  * under the GBA picture.
  *
+ * A move's own picture of a Pokemon - Role Play's white silhouette of its target, Snatch's runner -
+ * is drawn from the pack the same way (BattleSprites_NoteMoveMon).
+ *
  * Kept as the game's GBA sprite: a species or facing the pack does not hold
  * (permission-gated or missing art: Gen 6, Megas, Primals...), a shiny
  * without a library shiny, the Substitute doll, a battler whose palette is
@@ -56,6 +59,13 @@ void BattleSprites_NoteMonBgCleared(uint32_t bgId);
 /* A fainting foe sinks into the ground: nothing of it is drawn from screen row lineY down
  * (the GBA erases its picture's rows there as it moves down). */
 void BattleSprites_NoteSink(uint32_t battler, int32_t lineY);
+/* A move's own picture of a Pokemon (CreateAdditionalMonSpriteForMoveAnim: Role Play's silhouette,
+ * Snatch's runner), freshly decompressed rather than copied from a battler's tiles: its 64x64 sprite
+ * is made from `spriteTemplate` on the tiles from `tileNum`, `back` the facing it shows. It is drawn
+ * from the pack too while that sprite is up. */
+void BattleSprites_NoteMoveMon(uint32_t species, uint32_t personality, bool shiny, bool back,
+                               const uint16_t *palette, const void *pic, uint32_t tileNum,
+                               const void *spriteTemplate);
 
 /* ── Main thread, the game thread parked ── */
 /* sprite.c LoadOam: the state that goes with the OAM, palette and VRAM just loaded. */

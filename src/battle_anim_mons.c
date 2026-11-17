@@ -16,6 +16,10 @@
 #include "trig.h"
 #include "util.h"
 #include "constants/battle_anim.h"
+#ifdef ENABLE_BATTLE_SPRITES
+#include "platform/battle_sprites.h"
+#endif
+#line 19 // gba-line
 
 extern const struct OamData gOamData_AffineNormal_ObjNormal_64x64;
 
@@ -2078,6 +2082,14 @@ u8 CreateAdditionalMonSpriteForMoveAnim(enum Species species, bool32 isBackpic, 
     }
 
     RequestDma3Copy(gMonSpritesGfxPtr->buffer, (void *)(OBJ_VRAM0 + (sheet * 0x20)), MON_PIC_SIZE, 1);
+#ifdef ENABLE_BATTLE_SPRITES
+    // A move's own picture of a Pokemon (platform/battle_sprites.h): its animated library sprite too.
+    if (gMonSpritesGfxPtr != NULL)
+        BattleSprites_NoteMoveMon(species, personality, isShiny != FALSE, isBackpic != FALSE,
+                                  &gPlttBufferUnfaded[OBJ_PLTT_ID(palette)], gMonSpritesGfxPtr->buffer, sheet,
+                                  &sSpriteTemplates_MoveEffectMons[id]);
+#endif
+#line 2059 // gba-line
     FREE_AND_SET_NULL(gMonSpritesGfxPtr->buffer);
 
     if (!isBackpic)
