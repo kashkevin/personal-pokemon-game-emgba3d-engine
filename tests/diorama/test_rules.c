@@ -633,9 +633,21 @@ static void TestGenericMesherUtilities(void)
         MB_NORMAL, 0.0f, 1.0f, 15, 8) == 0.25f);
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_DOWN_N,
         MB_NORMAL, 0.0f, 1.0f, 8, 0) == -1.0f);
+    /* the default (the owner's #71): the bumpy slopes smooth, the muddy ones in one-pixel steps */
+    assert(gDioramaSmoothSlopes == DIORAMA_SMOOTH_SLOPES_BUMPY);
+    assert(DioramaRules_IsSmoothRamp(DIORAMA_ARCHETYPE_STAIRS_N, MB_BUMPY_SLOPE));
+    assert(!DioramaRules_IsSmoothRamp(DIORAMA_ARCHETYPE_STAIRS_N, MB_MUDDY_SLOPE));
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
+        MB_BUMPY_SLOPE, 0.0f, 1.0f, 8, 8) == 0.46875f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
+        MB_MUDDY_SLOPE, 0.0f, 1.0f, 8, 9) == 0.4375f);
+    assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
+        MB_MUDDY_SLOPE, 0.0f, 1.0f, 8, 0) == 1.0f);
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_NONE;
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
         MB_BUMPY_SLOPE, 0.0f, 1.0f, 8, 8) == 0.5f);
-    /* a bumpy slope climbs in the stairs' four-pixel steps (#71 B), a muddy slope in one-pixel steps */
+    /* every slope in steps (PKMN_DIORAMA_SMOOTH_SLOPES=0): a bumpy slope climbs in the stairs' four-pixel steps (#71
+     * B), a muddy slope in one-pixel steps */
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
         MB_BUMPY_SLOPE, 0.0f, 1.0f, 8, 9) == 0.5f);
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
@@ -644,8 +656,9 @@ static void TestGenericMesherUtilities(void)
         MB_MUDDY_SLOPE, 0.0f, 1.0f, 8, 9) == 0.4375f);
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
         MB_MUDDY_SLOPE, 0.0f, 1.0f, 8, 15) == 0.0625f);
-    /* smooth ramps (the owner's #71 C preview): the even rise at a pixel's centre, both slopes; stairs as before */
-    gDioramaSmoothSlopes = true;
+    /* smooth ramps (PKMN_DIORAMA_SMOOTH_SLOPES=1, the muddy ones too): the even rise at a pixel's centre, both
+     * slopes; stairs as before */
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_ALL;
     assert(DioramaRules_IsSmoothRamp(DIORAMA_ARCHETYPE_STAIRS_N, MB_BUMPY_SLOPE));
     assert(DioramaRules_IsSmoothRamp(DIORAMA_ARCHETYPE_STAIRS_DOWN_W, MB_MUDDY_SLOPE));
     assert(!DioramaRules_IsSmoothRamp(DIORAMA_ARCHETYPE_STAIRS_N, MB_NORMAL));
@@ -662,7 +675,7 @@ static void TestGenericMesherUtilities(void)
         MB_BUMPY_SLOPE, 0.0f, 1.0f, 8, 0) == -0.96875f);
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
         MB_NORMAL, 0.0f, 1.0f, 8, 8) == 0.5f);
-    gDioramaSmoothSlopes = false;
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_NONE;
     assert(!DioramaRules_IsSmoothRamp(DIORAMA_ARCHETYPE_STAIRS_N, MB_BUMPY_SLOPE));
     assert(DioramaRules_ProfileHeight(DIORAMA_ARCHETYPE_STAIRS_N,
         MB_BUMPY_SLOPE, 0.0f, 1.0f, 8, 15) == 0.25f);
@@ -671,6 +684,7 @@ static void TestGenericMesherUtilities(void)
     bridge.featureHeight = 1.0f;
     assert(DioramaRules_ObjectGroundHeight(&bridge, 3, 3, MB_BUMPY_SLOPE,
                                            8, 8) == 0.5f);
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_BUMPY;
 
     memset(&bridge, 0, sizeof(bridge));
     bridge.shape = DIORAMA_SHAPE_BRIDGE;

@@ -2957,11 +2957,16 @@ bool DioramaGLTerrain_Init(void)
         sNoSuperseded = value != NULL && value[0] == '0';
         value = SDL_getenv("PKMN_DIORAMA_ANIMATED_WAITS");
         sAnimatedBuildsAll = value != NULL && value[0] == '0';
-        /* the owner's #71 C, a preview: the bumpy and muddy slopes as smooth ramps (rules.h gDioramaSmoothSlopes) */
+        /* the owner's #71: the bumpy slopes smooth, the muddy ones in steps (rules.h gDioramaSmoothSlopes); 0 every
+         * slope in steps, 1 the muddy ones smooth too */
         value = SDL_getenv("PKMN_DIORAMA_SMOOTH_SLOPES");
-        gDioramaSmoothSlopes = value != NULL && value[0] == '1';
-        if (gDioramaSmoothSlopes)
-            SDL_Log("Diorama: the bumpy and muddy slopes as smooth ramps (PKMN_DIORAMA_SMOOTH_SLOPES=1, a preview)");
+        gDioramaSmoothSlopes = value != NULL && value[0] == '0' ? DIORAMA_SMOOTH_SLOPES_NONE
+                             : value != NULL && value[0] == '1' ? DIORAMA_SMOOTH_SLOPES_ALL
+                             : DIORAMA_SMOOTH_SLOPES_BUMPY;
+        if (gDioramaSmoothSlopes == DIORAMA_SMOOTH_SLOPES_NONE)
+            SDL_Log("Diorama: every slope in steps (PKMN_DIORAMA_SMOOTH_SLOPES=0)");
+        else if (gDioramaSmoothSlopes == DIORAMA_SMOOTH_SLOPES_ALL)
+            SDL_Log("Diorama: the bumpy and the muddy slopes as smooth ramps (PKMN_DIORAMA_SMOOTH_SLOPES=1, a preview)");
     }
     memset(sChunks, 0, sizeof(sChunks));
     memset(&sMetrics, 0, sizeof(sMetrics));

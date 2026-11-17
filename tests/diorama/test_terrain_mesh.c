@@ -786,7 +786,9 @@ static void TestCliffFaceBandsAndRamp(void)
     assert(mesh.topFaceCount == 79);
     assert(mesh.bounds.maxY == 1.0f);
 
-    /* a bumpy slope in the stairs' four-pixel steps (docs/owner-decisions.md #71 B): built as stairs are */
+    /* every slope in steps (PKMN_DIORAMA_SMOOTH_SLOPES=0): a bumpy slope in the stairs' four-pixel steps
+     * (docs/owner-decisions.md #71 B), built as stairs are */
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_NONE;
     InitInput(&input, 3, MB_NORMAL);
     center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
     center->shape = DIORAMA_SHAPE_STAIRS;
@@ -801,9 +803,10 @@ static void TestCliffFaceBandsAndRamp(void)
     assert(mesh.topFaceCount < 79);
     assert(mesh.geometryHash == stairsHash);
     assert(mesh.bounds.maxY == 1.0f);
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_BUMPY;
 }
 
-/* Smooth ramps (the owner's #71 C preview, gDioramaSmoothSlopes): a bumpy slope one sloped quad from its low edge
+/* Smooth ramps (the owner's #71 C, gDioramaSmoothSlopes): a bumpy slope one sloped quad from its low edge
  * to its high edge, open sides closed by triangles, no step's top between; off, the mesh as before. */
 static void TestSmoothRamp(void)
 {
@@ -822,11 +825,12 @@ static void TestSmoothRamp(void)
     center->archetype = DIORAMA_ARCHETYPE_STAIRS_N;
     center->featureHeight = 1.0f;
     center->behavior = MB_BUMPY_SLOPE;
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_NONE;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     steppedHash = mesh.geometryHash;
     steppedTops = mesh.topFaceCount;
 
-    gDioramaSmoothSlopes = true;
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_BUMPY;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(mesh.geometryHash != steppedHash);
     assert(mesh.topFaceCount < steppedTops);
@@ -844,7 +848,7 @@ static void TestSmoothRamp(void)
     }
     assert(highNorth && lowSouth);
 
-    gDioramaSmoothSlopes = false;
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_NONE;
     InitInput(&input, 3, MB_NORMAL);
     center = &input.cells[4 * DIORAMA_TERRAIN_INPUT_SIZE + 4];
     center->shape = DIORAMA_SHAPE_STAIRS;
@@ -853,6 +857,7 @@ static void TestSmoothRamp(void)
     center->behavior = MB_BUMPY_SLOPE;
     assert(DioramaTerrain_BuildChunk(&input, sVertices, DIORAMA_TERRAIN_MAX_VERTICES, &mesh));
     assert(mesh.geometryHash == steppedHash);
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_BUMPY;
 }
 
 static void TestCliffBaseCornersAndHeightTransition(void)

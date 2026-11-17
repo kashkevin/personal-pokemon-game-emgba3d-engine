@@ -487,10 +487,10 @@ uint64_t DioramaTerrain_ChunkSignature(const struct DioramaTerrainChunkInput *in
     at = PutU16(at, input->chunkY);
     at = PutU32(at, input->rulesGeneration);
     at = PutByte(at, input->rockFaces);
-    /* smooth ramps (AppendRamps): a mesh built with them is not one built without (nothing written while they are
-     * off, so every other signature is as before) */
-    if (gDioramaSmoothSlopes)
-        at = PutByte(at, 0x5A);
+    /* smooth ramps (AppendRamps): a mesh built with them is not one built without, nor with the muddy ones too
+     * (nothing written with every slope in steps) */
+    if (gDioramaSmoothSlopes != DIORAMA_SMOOTH_SLOPES_NONE)
+        at = PutByte(at, (uint8_t)(0x5A + gDioramaSmoothSlopes));
     /* The rock wall a side of plain ground shows, and each cell's claimOwner (GroundSideShowsRock reads both): a mesh
      * stands for any input of its signature, the renderer's cache and earlier versions (KNOWN_ISSUES MS-118). */
     if (input->rockFaces)
@@ -2978,7 +2978,7 @@ static struct DioramaTerrainMaterial WholeTile(const struct DioramaTerrainMateri
 }
 
 /*
- * Smooth ramps (the owner's #71 C preview, gDioramaSmoothSlopes; BuildOccupancy stands the cell's columns at the
+ * Smooth ramps (the owner's #71 C, gDioramaSmoothSlopes; BuildOccupancy stands the cell's columns at the
  * ramp's low end): each bumpy or muddy slope cell the chunk owns is one sloped quad from its low edge to its high
  * edge, laid with its whole top tile, and on its two sides along the climb a triangle from the low end's height up
  * to the ramp, its side tile - only above what stands beside it (a cliff's rock beside a ramp is the rock's face;
@@ -2990,7 +2990,7 @@ static bool AppendRamps(const struct DioramaTerrainChunkInput *input, struct Dio
     int gridX;
     int gridY;
 
-    if (!gDioramaSmoothSlopes)
+    if (gDioramaSmoothSlopes == DIORAMA_SMOOTH_SLOPES_NONE)
         return true;
     for (gridY = DIORAMA_TERRAIN_HALO; gridY < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; gridY++)
         for (gridX = DIORAMA_TERRAIN_HALO; gridX < DIORAMA_TERRAIN_HALO + DIORAMA_TERRAIN_CHUNK_SIZE; gridX++)

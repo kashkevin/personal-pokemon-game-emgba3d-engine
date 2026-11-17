@@ -245,7 +245,7 @@ static void TestResolvedPlateauPose(void)
     CHECK_CLOSE(pose.y, 2.0f);
 }
 
-/* A sprite crossing a smooth ramp (the owner's #71 C preview) stands on the ramp, not on a line between the cells'
+/* A sprite crossing a smooth ramp (the owner's #71 C) stands on the ramp, not on a line between the cells'
  * centres: a flat cell at 0, a bumpy slope climbing east from 0 to 1, a flat cell at 1. */
 static void TestSmoothRampPose(void)
 {
@@ -288,7 +288,7 @@ static void TestSmoothRampPose(void)
     sSnapshot.cells[row + 2].behavior = MB_BUMPY_SLOPE;
     for (smooth = 0; smooth < 2; smooth++)
     {
-        gDioramaSmoothSlopes = smooth != 0;
+        gDioramaSmoothSlopes = smooth ? DIORAMA_SMOOTH_SLOPES_BUMPY : DIORAMA_SMOOTH_SLOPES_NONE;
         for (i = 0; i < sizeof(cases) / sizeof(cases[0]); i++)
         {
             object.previousMapX = cases[i].from;
@@ -306,13 +306,13 @@ static void TestSmoothRampPose(void)
         }
     }
     /* flat to flat: as before, smooth or not */
-    gDioramaSmoothSlopes = true;
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_BUMPY;
     object.previousMapX = 0;
     object.currentMapX = 1;
     object.mapPixelOffsetX = -8;
     CHECK(DioramaSprite_BuildResolvedPose(&sSnapshot, sResolvedCells, sSnapshot.visibleCellCount, &object, &pose));
     CHECK_CLOSE(pose.groundY, 0.0f);
-    gDioramaSmoothSlopes = false;
+    gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_BUMPY;
     sSnapshot.cells[row + 2].behavior = 0;
     memset(sResolvedCells, 0, sizeof(sResolvedCells));
 }

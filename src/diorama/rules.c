@@ -1394,13 +1394,17 @@ float DioramaRules_DefaultGroundHeight(uint8_t behavior)
     return 0.0f;
 }
 
-bool gDioramaSmoothSlopes;
+int gDioramaSmoothSlopes = DIORAMA_SMOOTH_SLOPES_BUMPY;
 
 bool DioramaRules_IsSmoothRamp(uint8_t archetype, uint8_t behavior)
 {
-    return gDioramaSmoothSlopes
-        && archetype >= DIORAMA_ARCHETYPE_STAIRS_N && archetype <= DIORAMA_ARCHETYPE_STAIRS_DOWN_W
-        && (behavior == MB_MUDDY_SLOPE || behavior == MB_BUMPY_SLOPE);
+    if (archetype < DIORAMA_ARCHETYPE_STAIRS_N || archetype > DIORAMA_ARCHETYPE_STAIRS_DOWN_W)
+        return false;
+    if (behavior == MB_BUMPY_SLOPE)
+        return gDioramaSmoothSlopes >= DIORAMA_SMOOTH_SLOPES_BUMPY;
+    if (behavior == MB_MUDDY_SLOPE)
+        return gDioramaSmoothSlopes >= DIORAMA_SMOOTH_SLOPES_ALL;
+    return false;
 }
 
 float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
@@ -1424,12 +1428,12 @@ float DioramaRules_ProfileHeight(uint8_t archetype, uint8_t behavior,
      * east is high on the east - terrace_topology RAMP_ROLES; KNOWN_ISSUES MS-162.) */
     if (direction == 0 || direction == 3)
         coordinate = DIORAMA_BUILDING_PIXELS_PER_CELL - 1 - coordinate;
-    /* The Mach Bike's muddy slopes climb in one-pixel steps; stairs and the Acro Bike's bumpy slopes in four-pixel
-     * steps (one-pixel steps drew a bumpy slope's stones on slats, each riser a darker band: the owner's choice of
-     * 2026-11-17, docs/owner-decisions.md #71 B; a smooth slope, C, is the preview below, off by default). */
+    /* The Mach Bike's muddy slopes climb in one-pixel steps; stairs in four-pixel steps, and the Acro Bike's bumpy
+     * slopes too when they are not smooth (one-pixel steps drew a bumpy slope's stones on slats, each riser a darker
+     * band: docs/owner-decisions.md #71 B; smooth, C, the owner's choice for them since). */
     if (featureHeight == 0.0f)
         featureHeight = 1.0f;
-    /* a smooth ramp (the owner's #71 C preview): the height at the pixel's centre on the even rise */
+    /* a smooth ramp (the owner's #71 C): the height at the pixel's centre on the even rise */
     if (DioramaRules_IsSmoothRamp(archetype, behavior))
         return groundHeight + (descending ? -1.0f : 1.0f)
              * featureHeight * (coordinate + 0.5f) / DIORAMA_BUILDING_PIXELS_PER_CELL;

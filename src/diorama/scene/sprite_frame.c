@@ -166,7 +166,7 @@ static bool IsLedgeBankRule(const struct DioramaResolvedCell *rule)
 }
 
 /*
- * The ground under a sprite crossing a smooth ramp's cell (the owner's #71 C preview, rules.h gDioramaSmoothSlopes):
+ * The ground under a sprite crossing a smooth ramp's cell (the owner's #71 C, rules.h gDioramaSmoothSlopes):
  * on the ramp's cell the ramp's own height under the sprite's pixel; on the other cell a line from that cell's centre
  * to the ramp's edge. (The line between the two cells' centres, right for steps, floated a quarter level over a
  * ramp's foot and sank as far into its top.) False when neither cell is a ramp or the move is not along one axis.
