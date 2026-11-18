@@ -165,4 +165,16 @@ void UiW_MessagePageFlipDraw(const uint8_t *text, int printed, bool flip, int x,
 /* src/platform/sdl2.c: the key bound to a game button for the prompts (see ui_engine.h) */
 void Platform_NativeUiKeyLabel(int action, char *out, int size);
 
+/* The controller the game reads, for the prompts' buttons as its maker prints them (KNOWN_ISSUES MS-252): an Xbox pad's
+ * letters for XInput's controller and any pad SDL does not name; a PlayStation pad's symbols; a Nintendo pad's letters. */
+enum UiPadStyle
+{
+    UI_PAD_XBOX,
+    UI_PAD_PLAYSTATION,     /* DualShock 3 and 4: OPTIONS, SHARE */
+    UI_PAD_PLAYSTATION5,    /* DualSense: OPTIONS, CREATE */
+    UI_PAD_NINTENDO,        /* Switch Pro, Joy-Con: +, - */
+};
+/* src/platform/sdl2.c */
+int Platform_NativeUiPadStyle(void);
+
 #endif // GUARD_NATIVE_UI_WIDGETS_H

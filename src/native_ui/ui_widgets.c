@@ -368,10 +368,44 @@ static UiRGBA PadColour(const char *label)
     return UI_NONE;
 }
 
+/* A PlayStation pad's face buttons: its symbol in its colour on a dark button (the labels Glyphs gives that style). */
+static const char *const sPsCross[] = {"#.....#", ".#...#.", "..#.#..", "...#...", "..#.#..", ".#...#.", "#.....#"};
+static const char *const sPsCircle[] = {"..###..", ".#...#.", "#.....#", "#.....#", "#.....#", ".#...#.", "..###.."};
+static const char *const sPsSquare[] = {"#######", "#.....#", "#.....#", "#.....#", "#.....#", "#.....#", "#######"};
+static const char *const sPsTriangle[] = {"...#...", "...#...", "..#.#..", "..#.#..", ".#...#.", ".#...#.", "#######"};
+static const struct { const char *label; const char *const *rows; UiRGBA colour; } sPsButtons[] = {
+    {"PS_CROSS", sPsCross, UI_HEX(0x8CB8F0)},
+    {"PS_CIRCLE", sPsCircle, UI_HEX(0xF07878)},
+    {"PS_SQUARE", sPsSquare, UI_HEX(0xE8A0D8)},
+    {"PS_TRIANGLE", sPsTriangle, UI_HEX(0x50D8B0)},
+};
+
+static int PsButton(const char *label)
+{
+    for (int i = 0; i < (int)(sizeof(sPsButtons) / sizeof(sPsButtons[0])); i++)
+    {
+        if (strcmp(label, sPsButtons[i].label) == 0)
+            return i;
+    }
+    return -1;
+}
+
 int UiW_PadButton(int x, int y, const char *label)
 {
     UiRGBA pad = PadColour(label);
+    int ps = PsButton(label);
 
+    if (ps >= 0)
+    {
+        struct UiRamp r = UiRampOf(UI_HEX(0x2C3040), 0.4, 0.25, 0.6);
+        struct UiPaint o = {r.ink, r.hi, r.lo, 0, 0, NULL, 0};
+
+        UiG_Paint(UiM_Ellipse(11, 11), x, y, r.base, &o);
+        UiG_Mask(UiM_Rows(sPsButtons[ps].rows, 7, NULL), x + 2, y + 2, sPsButtons[ps].colour);
+        return x + 11;
+    }
+    if (pad != UI_NONE && Platform_NativeUiPadStyle() == UI_PAD_NINTENDO)
+        pad = UI_HEX(0x3C4048); /* a Nintendo pad's face buttons are all one dark grey, their letters white */
     if (pad != UI_NONE)
     {
         struct UiRamp r = UiRampOf(pad, 0.4, 0.25, 0.6);
@@ -395,7 +429,26 @@ int UiW_PadButton(int x, int y, const char *label)
 
 static int PadButtonWidth(const char *label)
 {
-    return PadColour(label) != UI_NONE ? 11 : UiCaps_Width(label) + 10;
+    return PadColour(label) != UI_NONE || PsButton(label) >= 0 ? 11 : UiCaps_Width(label) + 10;
+}
+
+/* A game button as the pad in use prints it (the mapping is XInput's for every pad, platform/gamepad.c: the bottom face
+ * button is A, the left and right ones B, the top one the details key; SDL names a Nintendo pad's by their labels). */
+enum PadRole { PAD_CONFIRM, PAD_CANCEL, PAD_START, PAD_SELECT, PAD_L, PAD_R, PAD_DETAILS };
+
+static const char *PadLabel(enum PadRole role)
+{
+    static const char *const sLabels[][7] = {
+        [UI_PAD_XBOX] = {"A", "X", "START", "BACK", "LB", "RB", "Y"},
+        [UI_PAD_PLAYSTATION] = {"PS_CROSS", "PS_SQUARE", "OPTIONS", "SHARE", "L1", "R1", "PS_TRIANGLE"},
+        [UI_PAD_PLAYSTATION5] = {"PS_CROSS", "PS_SQUARE", "OPTIONS", "CREATE", "L1", "R1", "PS_TRIANGLE"},
+        [UI_PAD_NINTENDO] = {"A", "B", "+", "-", "L", "R", "Y"},
+    };
+    int style = Platform_NativeUiPadStyle();
+
+    if (style < 0 || style >= (int)(sizeof(sLabels) / sizeof(sLabels[0])))
+        style = UI_PAD_XBOX;
+    return sLabels[style][role];
 }
 
 /* The game's keys (src/platform/sdl2.c) and its XInput mapping (A = A, the
@@ -416,21 +469,21 @@ static int Glyphs(enum UiAction action, const char *out[2])
 
     switch (action)
     {
-    case UI_ACT_CONFIRM: out[0] = pad ? "A" : KeyGlyph(KEYBIND_A, "Z", 0); return 1;
-    case UI_ACT_CANCEL: out[0] = pad ? "X" : KeyGlyph(KEYBIND_B, "X", 0); return 1;
-    case UI_ACT_START: out[0] = pad ? "START" : KeyGlyph(KEYBIND_START, "ENTER", 0); return 1;
-    case UI_ACT_SELECT: out[0] = pad ? "BACK" : KeyGlyph(KEYBIND_SELECT, "\\", 0); return 1;
-    case UI_ACT_L: out[0] = pad ? "LB" : KeyGlyph(KEYBIND_L, "A", 0); return 1;
-    case UI_ACT_R: out[0] = pad ? "RB" : KeyGlyph(KEYBIND_R, "S", 0); return 1;
+    case UI_ACT_CONFIRM: out[0] = pad ? PadLabel(PAD_CONFIRM) : KeyGlyph(KEYBIND_A, "Z", 0); return 1;
+    case UI_ACT_CANCEL: out[0] = pad ? PadLabel(PAD_CANCEL) : KeyGlyph(KEYBIND_B, "X", 0); return 1;
+    case UI_ACT_START: out[0] = pad ? PadLabel(PAD_START) : KeyGlyph(KEYBIND_START, "ENTER", 0); return 1;
+    case UI_ACT_SELECT: out[0] = pad ? PadLabel(PAD_SELECT) : KeyGlyph(KEYBIND_SELECT, "\\", 0); return 1;
+    case UI_ACT_L: out[0] = pad ? PadLabel(PAD_L) : KeyGlyph(KEYBIND_L, "A", 0); return 1;
+    case UI_ACT_R: out[0] = pad ? PadLabel(PAD_R) : KeyGlyph(KEYBIND_R, "S", 0); return 1;
     case UI_ACT_TABS:
-        out[0] = pad ? "LB" : KeyGlyph(KEYBIND_L, "A", 0);
-        out[1] = pad ? "RB" : KeyGlyph(KEYBIND_R, "S", 1);
+        out[0] = pad ? PadLabel(PAD_L) : KeyGlyph(KEYBIND_L, "A", 0);
+        out[1] = pad ? PadLabel(PAD_R) : KeyGlyph(KEYBIND_R, "S", 1);
         return 2;
     case UI_ACT_MOVE: out[0] = UI_CAPS_LEFT; out[1] = UI_CAPS_RIGHT; return 2;
     case UI_ACT_SCROLL: out[0] = UI_CAPS_UP; out[1] = UI_CAPS_DOWN; return 2;
     case UI_ACT_PC_MENU: out[0] = "F10"; return 1;
     case UI_ACT_ESC: out[0] = "ESC"; return 1;
-    case UI_ACT_DETAILS: out[0] = pad ? "Y" : "TAB"; return 1;
+    case UI_ACT_DETAILS: out[0] = pad ? PadLabel(PAD_DETAILS) : "TAB"; return 1;
     default: out[0] = "?"; return 1;
     }
 }

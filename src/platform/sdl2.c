@@ -78,6 +78,7 @@
 #include "diorama/tree_sprites.h"
 #ifdef ENABLE_NATIVE_UI
 #include "native_ui/native_ui.h"
+#include "native_ui/ui_widgets.h"
 #endif
 #include "multiplayer_menu.h"
 #endif
@@ -3907,6 +3908,40 @@ static int SelfTestKeybinds(void)
             SDL_JoystickDetachVirtual(index);
         ProcessEvents();
     }
+#ifdef ENABLE_NATIVE_UI
+    // The prompts' buttons follow the pad the game reads: SDL names a controller's type from its USB ids
+    {
+        static const struct { Uint16 vendor, product; int style; const char *what; } sPads[] = {
+            {0x054C, 0x09CC, UI_PAD_PLAYSTATION, "a DualShock 4 is a PlayStation pad (its symbols, OPTIONS, SHARE)"},
+            {0x054C, 0x0CE6, UI_PAD_PLAYSTATION5, "a DualSense is a PlayStation 5 pad (its symbols, OPTIONS, CREATE)"},
+            {0x057E, 0x2009, UI_PAD_NINTENDO, "a Switch Pro controller is a Nintendo pad (A, B, +, -)"},
+            {0, 0, UI_PAD_XBOX, "a pad SDL does not name keeps the Xbox letters"},
+        };
+
+        ExpectKeys("no controller: the Xbox letters", Platform_NativeUiPadStyle() == UI_PAD_XBOX);
+        for (unsigned int i = 0; i < ARRAY_COUNT(sPads); i++)
+        {
+            SDL_VirtualJoystickDesc desc;
+            int index = -1;
+
+            SDL_zero(desc);
+            desc.version = SDL_VIRTUAL_JOYSTICK_DESC_VERSION;
+            desc.type = SDL_JOYSTICK_TYPE_GAMECONTROLLER;
+            desc.naxes = SDL_CONTROLLER_AXIS_MAX;
+            desc.nbuttons = SDL_CONTROLLER_BUTTON_MAX;
+            desc.vendor_id = sPads[i].vendor;
+            desc.product_id = sPads[i].product;
+            desc.name = "Self-test pad";
+            if (sSdlPadsOn)
+                index = SDL_JoystickAttachVirtualEx(&desc);
+            ProcessEvents();
+            ExpectKeys(sPads[i].what, sSdlPad != NULL && Platform_NativeUiPadStyle() == sPads[i].style);
+            if (index >= 0)
+                SDL_JoystickDetachVirtual(index);
+            ProcessEvents();
+        }
+    }
+#endif
 #endif
 
     remove(sConfigPath);
@@ -4227,6 +4262,13 @@ static void TestPad_Start(void)
     desc.naxes = SDL_CONTROLLER_AXIS_MAX;
     desc.nbuttons = SDL_CONTROLLER_BUTTON_MAX;
     desc.name = "Test pad";
+    // =ps4, =ps5, =switch: that controller by its USB ids (SDL names its type from them; the prompts' buttons follow)
+    if (SDL_strcmp(setting, "ps4") == 0)
+        desc.vendor_id = 0x054C, desc.product_id = 0x09CC, desc.name = "Test pad (DualShock 4)";
+    else if (SDL_strcmp(setting, "ps5") == 0)
+        desc.vendor_id = 0x054C, desc.product_id = 0x0CE6, desc.name = "Test pad (DualSense)";
+    else if (SDL_strcmp(setting, "switch") == 0)
+        desc.vendor_id = 0x057E, desc.product_id = 0x2009, desc.name = "Test pad (Switch Pro)";
     index = sSdlPadsOn ? SDL_JoystickAttachVirtualEx(&desc) : -1;
     sTestPad = index >= 0 ? SDL_JoystickOpen(index) : NULL;
     SDL_Log("Test pad: %s", sTestPad != NULL ? (sTestPadStick ? "the test keys through a virtual controller, the directions on its stick"
@@ -4478,6 +4520,35 @@ void Platform_NativeUiKeyLabel(int action, char *out, int size)
     out[0] = '\0';
     if (action >= 0 && action < KEYBIND_COUNT)
         Keybinds_KeyLabel(sKeybinds.key[action], &sKeyNames, out, size);
+}
+
+int Platform_NativeUiPadStyle(void)
+{
+#ifndef __ANDROID__
+#ifdef _WIN32
+    if (sPadConnected)
+        return UI_PAD_XBOX; // XInput's controller is the one read
+#endif
+    if (sSdlPad != NULL)
+    {
+        switch (SDL_GameControllerGetType(sSdlPad))
+        {
+        case SDL_CONTROLLER_TYPE_PS3:
+        case SDL_CONTROLLER_TYPE_PS4:
+            return UI_PAD_PLAYSTATION;
+        case SDL_CONTROLLER_TYPE_PS5:
+            return UI_PAD_PLAYSTATION5;
+        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_PRO:
+        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_LEFT:
+        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT:
+        case SDL_CONTROLLER_TYPE_NINTENDO_SWITCH_JOYCON_PAIR:
+            return UI_PAD_NINTENDO;
+        default:
+            break;
+        }
+    }
+#endif
+    return UI_PAD_XBOX;
 }
 
 void Platform_NativeUiSaveWrites(u32 *written, u32 *failed, bool8 *pending)
