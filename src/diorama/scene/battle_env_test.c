@@ -356,9 +356,10 @@ static struct
     int oweRebumpAt, oweRebumpKind;
     bool safari, safariEntered;
     /* PKMN_TEST_PALETTE_FREE=<n>: on the field, stand-in palettes keep exactly n sprite palettes free (a crowded world
-       map); PKMN_TEST_TILES_FULL=<frames>: that many field frames in, every free sprite tile taken (a busy map's OBJ
-       tile memory full) */
+       map; 0: none free, every slot taken - KNOWN_ISSUES MS-210's busy Pokemon Center); PKMN_TEST_TILES_FULL=<frames>: that
+       many field frames in, every free sprite tile taken (a busy map's OBJ tile memory full) */
     int paletteFree, tilesFullAt, tilesFrames;
+    bool paletteCrowd, paletteCrowdLogged;
     bool tilesFull;
     /* PKMN_TEST_PALETTE_SQUEEZE=<frames>: every that many field frames, stand-in palettes loaded until none loads (the
        field's oldest visible wild Pokemon removed one by one to make room: sprite.c LoadSpritePalette), then freed */
@@ -659,6 +660,7 @@ static void Init(void)
     if (value == NULL || sscanf(value, "%d:%d:%d", &s.roamerSpecies, &s.roamerLevel, &s.roamerShiny) != 3)
         s.roamerSpecies = 0;
     s.paletteFree = EnvInt("PKMN_TEST_PALETTE_FREE", 0);
+    s.paletteCrowd = SDL_getenv("PKMN_TEST_PALETTE_FREE") != NULL && s.paletteFree >= 0;
     s.paletteSqueeze = EnvInt("PKMN_TEST_PALETTE_SQUEEZE", 0);
     value = SDL_getenv("PKMN_TEST_SAFARI_LIMITS");
     if (value == NULL || sscanf(value, "%d:%d", &s.safariBalls, &s.safariSteps) != 2)
@@ -2170,7 +2172,7 @@ static void CrowdField(void)
     if (gMain.inBattle || SDL_AtomicGet(&s.fieldSeen) == 0 || gMain.callback2 != CB2_Overworld)
         return;
     /* the stand-ins loaded now (a warp clears every palette tag, so they are looked up, not counted) */
-    for (int tag = DUMMY_PALETTE_TAG; s.paletteFree > 0 && tag < DUMMY_PALETTE_TAG + 16; tag++)
+    for (int tag = DUMMY_PALETTE_TAG; s.paletteCrowd && tag < DUMMY_PALETTE_TAG + 16; tag++)
     {
         bool loaded = IndexOfSpritePaletteTag(tag) != 0xFF;
 
@@ -2184,6 +2186,11 @@ static void CrowdField(void)
         {
             FreeSpritePaletteByTag(tag);
         }
+    }
+    if (s.paletteCrowd && !s.paletteCrowdLogged && (int)CountFreePaletteSlots() == s.paletteFree)
+    {
+        s.paletteCrowdLogged = true;
+        TestLog("Battle env test: palette crowd: %d sprite palettes free", (int)CountFreePaletteSlots());
     }
     if (s.paletteSqueeze > 0 && ++s.squeezeFrames % s.paletteSqueeze == 0)
     {
